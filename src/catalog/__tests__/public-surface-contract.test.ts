@@ -55,5 +55,6 @@ describe('catalog public-surface contract', () => {
     assert.match(agentsDoc, /\/prompts:debugger <strong>\(internal expert\)<\/strong>/i);
     assert.match(agentsDoc, /\/prompts:code-reviewer <strong>\(internal expert\)<\/strong>/i);
     assert.match(agentsDoc, /\/prompts:security-reviewer <strong>\(internal expert\)<\/strong>/i);
+    assert.match(agentsDoc, /first-class public critique agent/i);
   });
 });

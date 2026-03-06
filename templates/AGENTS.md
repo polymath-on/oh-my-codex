@@ -143,7 +143,7 @@ Product Lane:
 - `/prompts:product-analyst`: Product metrics, funnel analysis, experiments
 
 Coordination:
-- `/prompts:critic`: Plan/design critical challenge only; not generic code review or bug diagnosis
+- `/prompts:critic`: First-class public critique agent for plans/designs; not generic code review or bug diagnosis
 - `/prompts:vision`: Image/screenshot/diagram analysis
 </agent_catalog>
 
