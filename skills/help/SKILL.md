@@ -151,7 +151,7 @@ Format a summary with:
 
 TOKEN SUMMARY:
 - Total records: 1,234
-- By Model: opus 45%, sonnet 40%, haiku 15%
+- By Reasoning Effort: high 45%, medium 40%, low 15%
 
 TOP AGENTS:
 1. executor (234 uses)

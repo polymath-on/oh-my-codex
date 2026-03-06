@@ -122,7 +122,7 @@ Model precedence (highest to lowest):
 
 Thinking-level rule (critical):
 - **No model-name heuristic mapping.**
-- Team runtime must **not** infer `model_reasoning_effort` from model strings (e.g., `spark`, `opus`, `mini`).
+- Team runtime must **not** infer `model_reasoning_effort` from model-name substrings (e.g., `spark`, `high-capability`, `mini`).
 - Worker thinking level is applied **only when explicitly provided** (leader/user launch args or explicit config).
 - If no explicit thinking value is provided, runtime leaves `model_reasoning_effort` unset.
 
