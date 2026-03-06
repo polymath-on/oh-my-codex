@@ -4,7 +4,7 @@ import { join, resolve } from 'path';
 import { enterpriseTmuxAdapter, type EnterpriseTmuxSession } from './tmux-adapter.js';
 import { writeEnterpriseWorkerInstructions } from './worker-bootstrap.js';
 import { applyEnterpriseExecutionUpdates, readEnterpriseRuntime, type EnterpriseRuntimeHandle } from './runtime.js';
-import { appendEnterpriseEvent, clearEnterpriseLiveState, sendEnterpriseMailboxMessage } from './state.js';
+import { appendEnterpriseEvent, clearEnterpriseLiveState, sendEnterpriseMailboxMessage, writeEnterpriseWorkerIdentity } from './state.js';
 import { updateModeState } from '../modes/base.js';
 import type { EnterpriseMonitorSnapshot, EnterpriseNode } from './contracts.js';
 
@@ -83,7 +83,7 @@ async function buildLiveWorker(
     'codex',
     `Enterprise ${node.role} ${node.label} owns scope: ${node.scope}. Read instructions at ${instructionPath}.`,
   );
-  return {
+  const record = {
     nodeId: node.id,
     role: node.role,
     ownerLeadId,
@@ -92,6 +92,8 @@ async function buildLiveWorker(
     startupCommand,
     instructionPath,
   };
+  await writeEnterpriseWorkerIdentity(projectRoot, { ...record, updatedAt: new Date().toISOString() });
+  return record;
 }
 
 async function persistLiveRuntimeSnapshot(projectRoot: string, live: EnterpriseLiveRuntimeSnapshot): Promise<void> {
@@ -294,6 +296,9 @@ export async function shutdownEnterpriseLiveNode(nodeId: string, cwd: string = p
     updated_at: new Date().toISOString(),
   };
   await persistLiveRuntimeSnapshot(projectRoot, updatedLive);
+  for (const workerRecord of updatedLive.workers) {
+    await writeEnterpriseWorkerIdentity(projectRoot, { ...workerRecord, updatedAt: updatedLive.updated_at });
+  }
   await updateModeState('enterprise', {
     live_worker_count: updatedLive.workers.length,
     live_subordinate_count: updatedLive.workers.filter((entry) => entry.role === 'subordinate').length,

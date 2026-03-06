@@ -19,7 +19,9 @@ import {
   readEnterpriseSubordinateRecord,
   listEnterpriseAssignments,
   listEnterpriseEscalations,
+  listEnterpriseWorkerIdentities,
   markEnterpriseMailboxDelivered,
+  readEnterpriseWorkerIdentity,
   sendEnterpriseMailboxMessage,
 } from '../enterprise/state.js';
 import {
@@ -250,7 +252,8 @@ async function renderInspect(kind: string, id: string | undefined): Promise<void
       if (!record) throw new Error(`Enterprise subordinate not found: ${id}`);
       const live = await readEnterpriseLiveRuntime(cwd);
       const liveWorker = live?.workers.find((worker) => worker.nodeId === id) ?? null;
-      console.log(JSON.stringify({ ...record, liveWorker, mailbox: await readEnterpriseMailbox(cwd, id) }, null, 2));
+      const workerIdentity = await readEnterpriseWorkerIdentity(cwd, id);
+      console.log(JSON.stringify({ ...record, liveWorker, workerIdentity, mailbox: await readEnterpriseMailbox(cwd, id) }, null, 2));
       return;
     }
     case 'division': {
@@ -260,7 +263,8 @@ async function renderInspect(kind: string, id: string | undefined): Promise<void
       const live = await readEnterpriseLiveRuntime(cwd);
       const leadWorker = live?.workers.find((worker) => worker.nodeId === id) ?? null;
       const subordinateWorkers = live?.workers.filter((worker) => worker.ownerLeadId === id) ?? [];
-      console.log(JSON.stringify({ ...summary, liveLeadWorker: leadWorker, liveSubordinateWorkers: subordinateWorkers }, null, 2));
+      const workerIdentity = await readEnterpriseWorkerIdentity(cwd, id);
+      console.log(JSON.stringify({ ...summary, liveLeadWorker: leadWorker, workerIdentity, liveSubordinateWorkers: subordinateWorkers }, null, 2));
       return;
     }
     case 'chairman': {
@@ -281,8 +285,12 @@ async function renderInspect(kind: string, id: string | undefined): Promise<void
       console.log(JSON.stringify(await readEnterpriseEventLog(cwd), null, 2));
       return;
     }
+    case 'workers': {
+      console.log(JSON.stringify(await listEnterpriseWorkerIdentities(cwd), null, 2));
+      return;
+    }
     default:
-      throw new Error('Usage: omx enterprise inspect <subordinate|division|chairman|assignments|escalations|events> [id]');
+      throw new Error('Usage: omx enterprise inspect <subordinate|division|chairman|assignments|escalations|events|workers> [id]');
   }
 }
 

@@ -1,6 +1,6 @@
 import { describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -35,6 +35,9 @@ describe('enterprise live runtime', () => {
       assert.equal(handle.live.workers.some((worker) => worker.role === 'division_lead'), true);
       assert.equal(handle.live.workers.some((worker) => worker.role === 'subordinate'), true);
       assert.equal(handle.live.workers.find((worker) => worker.nodeId === 'subordinate-1')?.ownerLeadId, 'division-1');
+      const workerIdentity = JSON.parse(await readFile(join(cwd, '.omx', 'state', 'enterprise', 'workers', 'subordinate-1.json'), 'utf-8')) as { nodeId: string; role: string };
+      assert.equal(workerIdentity.nodeId, 'subordinate-1');
+      assert.equal(workerIdentity.role, 'subordinate');
       const reread = await runtime.readEnterpriseRuntime(cwd);
       assert.equal(reread?.modeState.live_subordinate_count, 1);
       const monitor = await liveRuntime.readEnterpriseMonitorSnapshot(cwd);
@@ -114,8 +117,6 @@ describe('enterprise live runtime', () => {
       await rm(cwd, { recursive: true, force: true });
     }
   });
-});
-
 
   it('shuts down a single live subordinate node', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'omx-enterprise-live-'));
@@ -148,7 +149,6 @@ describe('enterprise live runtime', () => {
     }
   });
 
-
   it('cascades shutdown from a division lead to its owned subordinates', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'omx-enterprise-live-'));
     const previousTmux = process.env.TMUX;
@@ -179,4 +179,4 @@ describe('enterprise live runtime', () => {
       await rm(cwd, { recursive: true, force: true });
     }
   });
-
+});

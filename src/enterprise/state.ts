@@ -51,6 +51,18 @@ export interface EnterpriseMailbox {
   messages: EnterpriseMailboxMessage[];
 }
 
+
+export interface EnterpriseWorkerIdentityRecord {
+  nodeId: string;
+  role: 'division_lead' | 'subordinate';
+  ownerLeadId: string | null;
+  paneId: string;
+  cwd: string;
+  startupCommand: string;
+  instructionPath: string;
+  updatedAt: string;
+}
+
 export interface EnterpriseEventRecord {
   type:
     | 'runtime_started'
@@ -117,6 +129,37 @@ export function escalationRecordPath(cwd: string, escalationId: string): string 
 
 export function mailboxPath(cwd: string, nodeId: string): string {
   return join(mailboxDir(cwd), `${nodeId}.json`);
+}
+
+
+function workerIdentityDir(cwd: string): string {
+  return join(enterpriseStateRoot(cwd), 'workers');
+}
+
+export function workerIdentityPath(cwd: string, nodeId: string): string {
+  return join(workerIdentityDir(cwd), `${nodeId}.json`);
+}
+
+export async function writeEnterpriseWorkerIdentity(cwd: string, record: EnterpriseWorkerIdentityRecord): Promise<void> {
+  await mkdir(workerIdentityDir(cwd), { recursive: true });
+  await writeFile(workerIdentityPath(cwd, record.nodeId), JSON.stringify(record, null, 2));
+}
+
+export async function readEnterpriseWorkerIdentity(cwd: string, nodeId: string): Promise<EnterpriseWorkerIdentityRecord | null> {
+  const path = workerIdentityPath(cwd, nodeId);
+  if (!existsSync(path)) return null;
+  return JSON.parse(await readFile(path, 'utf-8')) as EnterpriseWorkerIdentityRecord;
+}
+
+export async function listEnterpriseWorkerIdentities(cwd: string): Promise<EnterpriseWorkerIdentityRecord[]> {
+  const dir = workerIdentityDir(cwd);
+  if (!existsSync(dir)) return [];
+  const files = await readdir(dir);
+  const records = await Promise.all(files.filter((file) => file.endsWith('.json')).map(async (file) => {
+    const raw = await readFile(join(dir, file), 'utf-8');
+    return JSON.parse(raw) as EnterpriseWorkerIdentityRecord;
+  }));
+  return records.sort((left, right) => left.nodeId.localeCompare(right.nodeId));
 }
 
 export async function persistEnterpriseRecords(

@@ -80,14 +80,7 @@ describe('enterpriseCommand', () => {
       const tmuxAdapter = await import('../../enterprise/tmux-adapter.js');
       mock.method(tmuxAdapter.enterpriseTmuxAdapter, 'isTmuxAvailable', async () => true);
       mock.method(tmuxAdapter.enterpriseTmuxAdapter, 'createTmuxSession', async () => ({
-        name: 'leader:1',
-        workerCount: 1,
-        cwd,
-        workerPaneIds: ['%101'],
-        leaderPaneId: '%100',
-        hudPaneId: null,
-        resizeHookName: null,
-        resizeHookTarget: null,
+        name: 'leader:1', workerCount: 1, cwd, workerPaneIds: ['%101'], leaderPaneId: '%100', hudPaneId: null, resizeHookName: null, resizeHookTarget: null,
       }));
       mock.method(tmuxAdapter.enterpriseTmuxAdapter, 'buildWorkerStartupCommand', async (_team: string, idx: number) => `codex --worker ${idx}`);
       mock.method(tmuxAdapter.enterpriseTmuxAdapter, 'spawnPane', async () => '%102');
@@ -120,14 +113,7 @@ describe('enterpriseCommand', () => {
       const tmuxAdapter = await import('../../enterprise/tmux-adapter.js');
       mock.method(tmuxAdapter.enterpriseTmuxAdapter, 'isTmuxAvailable', async () => true);
       mock.method(tmuxAdapter.enterpriseTmuxAdapter, 'createTmuxSession', async () => ({
-        name: 'leader:1',
-        workerCount: 1,
-        cwd,
-        workerPaneIds: ['%101'],
-        leaderPaneId: '%100',
-        hudPaneId: null,
-        resizeHookName: null,
-        resizeHookTarget: null,
+        name: 'leader:1', workerCount: 1, cwd, workerPaneIds: ['%101'], leaderPaneId: '%100', hudPaneId: null, resizeHookName: null, resizeHookTarget: null,
       }));
       mock.method(tmuxAdapter.enterpriseTmuxAdapter, 'buildWorkerStartupCommand', async (_team: string, idx: number) => `codex --worker ${idx}`);
       mock.method(tmuxAdapter.enterpriseTmuxAdapter, 'spawnPane', async () => '%102');
@@ -207,7 +193,6 @@ describe('enterpriseCommand', () => {
     }
   });
 
-
   it('shuts down a single live worker through the CLI', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'omx-enterprise-cli-'));
     const previousCwd = process.cwd();
@@ -241,7 +226,6 @@ describe('enterpriseCommand', () => {
       await rm(cwd, { recursive: true, force: true });
     }
   });
-
 
   it('cascades division-lead shutdown through the CLI', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'omx-enterprise-cli-'));
