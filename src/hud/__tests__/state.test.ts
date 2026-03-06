@@ -121,11 +121,22 @@ describe('readEnterpriseState', () => {
         subordinate_count: 5,
         chairman_state: 'working',
       }));
+      await mkdir(join(rootStateDir, 'enterprise', 'worker-heartbeat'), { recursive: true });
+      await writeFile(join(rootStateDir, 'enterprise', 'worker-heartbeat', 'division-1.json'), JSON.stringify({
+        nodeId: 'division-1',
+        paneId: '%101',
+        alive: true,
+        lastHeartbeatAt: new Date().toISOString(),
+        ownerLeadId: null,
+      }));
 
       const state = await readEnterpriseState(cwd);
       assert.ok(state);
       assert.equal(state?.division_count, 2);
       assert.equal(state?.chairman_state, 'working');
+      assert.equal(state?.healthy_worker_count, 1);
+      assert.equal(state?.stale_worker_count, 0);
+      assert.equal(state?.offline_worker_count, 0);
     } finally {
       await rm(cwd, { recursive: true, force: true });
     }

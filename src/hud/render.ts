@@ -78,12 +78,18 @@ function renderEnterprise(ctx: HudRenderContext): string | null {
   const divisions = ctx.enterprise.division_count;
   const subordinates = ctx.enterprise.subordinate_count;
   const chairmanState = ctx.enterprise.chairman_state ? sanitizeDynamicText(ctx.enterprise.chairman_state) : '';
+  const healthy = ctx.enterprise.healthy_worker_count;
+  const stale = ctx.enterprise.stale_worker_count;
+  const offline = ctx.enterprise.offline_worker_count;
+  const healthSuffix = typeof healthy === 'number' || typeof stale === 'number' || typeof offline === 'number'
+    ? ` h${healthy ?? 0}/s${stale ?? 0}/o${offline ?? 0}`
+    : '';
   if (typeof divisions === 'number' && typeof subordinates === 'number') {
     const suffix = chairmanState ? `:${chairmanState}` : '';
-    return yellow(`enterprise:${divisions}d/${subordinates}s${suffix}`);
+    return yellow(`enterprise:${divisions}d/${subordinates}s${suffix}${healthSuffix}`);
   }
-  if (chairmanState) return yellow(`enterprise:${chairmanState}`);
-  return yellow('enterprise');
+  if (chairmanState) return yellow(`enterprise:${chairmanState}${healthSuffix}`);
+  return yellow(`enterprise${healthSuffix}`);
 }
 
 function renderTurns(ctx: HudRenderContext): string | null {

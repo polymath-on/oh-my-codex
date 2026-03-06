@@ -63,9 +63,41 @@ export async function readTeamState(cwd: string): Promise<TeamStateForHud | null
   return state?.active ? state : null;
 }
 
+
+async function readEnterpriseHealthCounts(cwd: string): Promise<{ healthy_worker_count: number; stale_worker_count: number; offline_worker_count: number }> {
+  const enterpriseRoot = join(cwd, '.omx', 'state', 'enterprise', 'worker-heartbeat');
+  const result = { healthy_worker_count: 0, stale_worker_count: 0, offline_worker_count: 0 };
+  try {
+    const { readdir } = await import('fs/promises');
+    const files = await readdir(enterpriseRoot);
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue;
+      const heartbeat = await readJsonFile<{ alive?: boolean; lastHeartbeatAt?: string }>(join(enterpriseRoot, file));
+      if (!heartbeat || heartbeat.alive !== true) {
+        result.offline_worker_count += 1;
+        continue;
+      }
+      const last = new Date(String(heartbeat.lastHeartbeatAt ?? '')).getTime();
+      if (!Number.isFinite(last)) {
+        result.offline_worker_count += 1;
+        continue;
+      }
+      if (Date.now() - last > 60_000) result.stale_worker_count += 1;
+      else result.healthy_worker_count += 1;
+    }
+  } catch {
+    // ignore missing heartbeat state
+  }
+  return result;
+}
+
 export async function readEnterpriseState(cwd: string): Promise<EnterpriseStateForHud | null> {
   const state = await readScopedModeState<EnterpriseStateForHud>(cwd, 'enterprise');
-  return state?.active ? state : null;
+  if (!state?.active) return null;
+  return {
+    ...state,
+    ...(await readEnterpriseHealthCounts(cwd)),
+  };
 }
 
 export async function readMetrics(cwd: string): Promise<HudMetrics | null> {

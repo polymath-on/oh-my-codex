@@ -36,6 +36,9 @@ export interface EnterpriseStateForHud {
   division_count?: number;
   subordinate_count?: number;
   chairman_state?: string;
+  healthy_worker_count?: number;
+  stale_worker_count?: number;
+  offline_worker_count?: number;
 }
 
 /** Metrics tracked by notify hook */
