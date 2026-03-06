@@ -1,0 +1,117 @@
+import { describe, it, mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+
+describe('enterprise live runtime', () => {
+  it('persists live tmux metadata and subordinate pane records', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'omx-enterprise-live-'));
+    const previousTmux = process.env.TMUX;
+    process.env.TMUX = 'leader-session';
+    try {
+      const tmuxSession = await import('../tmux-adapter.js');
+      mock.method(tmuxSession.enterpriseTmuxAdapter, 'isTmuxAvailable', async () => true);
+      mock.method(tmuxSession.enterpriseTmuxAdapter, 'createTmuxSession', async () => ({
+        name: 'leader:1',
+        workerCount: 1,
+        cwd,
+        workerPaneIds: ['%101'],
+        leaderPaneId: '%100',
+        hudPaneId: null,
+        resizeHookName: null,
+        resizeHookTarget: null,
+      }));
+      mock.method(tmuxSession.enterpriseTmuxAdapter, 'buildWorkerStartupCommand', async (_team: string, idx: number) => `codex --worker ${idx}`);
+      mock.method(tmuxSession.enterpriseTmuxAdapter, 'spawnPane', async () => '%102');
+
+      const runtime = await import('../runtime.js');
+      await runtime.startEnterpriseRuntime('issue 590', {}, cwd);
+      const liveRuntime = await import('../live-runtime.js');
+      const handle = await liveRuntime.startEnterpriseLiveRuntime(cwd);
+
+      assert.equal(handle.live.tmuxSessionName, 'leader:1');
+      assert.equal(handle.live.workers.some((worker) => worker.role === 'division_lead'), true);
+      assert.equal(handle.live.workers.some((worker) => worker.role === 'subordinate'), true);
+      assert.equal(handle.live.workers.find((worker) => worker.nodeId === 'subordinate-1')?.ownerLeadId, 'division-1');
+      const reread = await runtime.readEnterpriseRuntime(cwd);
+      assert.equal(reread?.modeState.live_subordinate_count, 1);
+      const monitor = await liveRuntime.readEnterpriseMonitorSnapshot(cwd);
+      assert.ok(monitor);
+      assert.equal(existsSync(join(cwd, '.omx', 'state', 'enterprise-live-runtime.json')), true);
+    } finally {
+      if (typeof previousTmux === 'string') process.env.TMUX = previousTmux;
+      else delete process.env.TMUX;
+      mock.restoreAll();
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('spawns a subordinate pane when a new subordinate is assigned during live runtime', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'omx-enterprise-live-'));
+    const previousTmux = process.env.TMUX;
+    process.env.TMUX = 'leader-session';
+    try {
+      const tmuxSession = await import('../tmux-adapter.js');
+      mock.method(tmuxSession.enterpriseTmuxAdapter, 'isTmuxAvailable', async () => true);
+      mock.method(tmuxSession.enterpriseTmuxAdapter, 'createTmuxSession', async () => ({
+        name: 'leader:1', workerCount: 1, cwd, workerPaneIds: ['%101'], leaderPaneId: '%100', hudPaneId: null, resizeHookName: null, resizeHookTarget: null,
+      }));
+      mock.method(tmuxSession.enterpriseTmuxAdapter, 'buildWorkerStartupCommand', async (_team: string, idx: number) => `codex --worker ${idx}`);
+      const spawned: string[] = [];
+      mock.method(tmuxSession.enterpriseTmuxAdapter, 'spawnPane', async () => {
+        const id = `%10${spawned.length + 2}`;
+        spawned.push(id);
+        return id;
+      });
+
+      const runtime = await import('../runtime.js');
+      const liveRuntime = await import('../live-runtime.js');
+      await runtime.startEnterpriseRuntime('issue 590', {}, cwd);
+      await liveRuntime.startEnterpriseLiveRuntime(cwd);
+      const assigned = await runtime.assignEnterpriseSubordinate('division-1', 'Verifier', 'verify runtime shell', cwd);
+      const live = await liveRuntime.spawnEnterpriseSubordinateWorker(assigned.subordinateId, cwd);
+
+      assert.equal(live.workers.some((worker) => worker.nodeId === assigned.subordinateId), true);
+      assert.equal(spawned.length >= 2, true);
+    } finally {
+      if (typeof previousTmux === 'string') process.env.TMUX = previousTmux;
+      else delete process.env.TMUX;
+      mock.restoreAll();
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('shuts down live runtime and clears persisted live state', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'omx-enterprise-live-'));
+    const previousTmux = process.env.TMUX;
+    process.env.TMUX = 'leader-session';
+    try {
+      const tmuxSession = await import('../tmux-adapter.js');
+      mock.method(tmuxSession.enterpriseTmuxAdapter, 'isTmuxAvailable', async () => true);
+      mock.method(tmuxSession.enterpriseTmuxAdapter, 'createTmuxSession', async () => ({
+        name: 'leader:1', workerCount: 1, cwd, workerPaneIds: ['%101'], leaderPaneId: '%100', hudPaneId: null, resizeHookName: null, resizeHookTarget: null,
+      }));
+      mock.method(tmuxSession.enterpriseTmuxAdapter, 'buildWorkerStartupCommand', async () => 'codex --yolo');
+      mock.method(tmuxSession.enterpriseTmuxAdapter, 'spawnPane', async () => '%102');
+      mock.method(tmuxSession.enterpriseTmuxAdapter, 'destroyTmuxSession', async () => {});
+
+      const runtime = await import('../runtime.js');
+      await runtime.startEnterpriseRuntime('issue 590', {}, cwd);
+      const liveRuntime = await import('../live-runtime.js');
+      await liveRuntime.startEnterpriseLiveRuntime(cwd);
+      await liveRuntime.shutdownEnterpriseLiveRuntime(cwd);
+
+      assert.equal(existsSync(join(cwd, '.omx', 'state', 'enterprise-live-runtime.json')), false);
+      assert.equal(existsSync(join(cwd, '.omx', 'state', 'enterprise-monitor-snapshot.json')), false);
+      const reread = await runtime.readEnterpriseRuntime(cwd);
+      assert.equal(reread?.modeState.live_tmux_session, null);
+    } finally {
+      if (typeof previousTmux === 'string') process.env.TMUX = previousTmux;
+      else delete process.env.TMUX;
+      mock.restoreAll();
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+});

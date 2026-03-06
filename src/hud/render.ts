@@ -73,6 +73,19 @@ function renderTeam(ctx: HudRenderContext): string | null {
   return green('team');
 }
 
+function renderEnterprise(ctx: HudRenderContext): string | null {
+  if (!ctx.enterprise) return null;
+  const divisions = ctx.enterprise.division_count;
+  const subordinates = ctx.enterprise.subordinate_count;
+  const chairmanState = ctx.enterprise.chairman_state ? sanitizeDynamicText(ctx.enterprise.chairman_state) : '';
+  if (typeof divisions === 'number' && typeof subordinates === 'number') {
+    const suffix = chairmanState ? `:${chairmanState}` : '';
+    return yellow(`enterprise:${divisions}d/${subordinates}s${suffix}`);
+  }
+  if (chairmanState) return yellow(`enterprise:${chairmanState}`);
+  return yellow('enterprise');
+}
+
 function renderTurns(ctx: HudRenderContext): string | null {
   if (!ctx.metrics || !isCurrentSessionMetrics(ctx)) return null;
   return dim(`turns:${ctx.metrics.session_turns}`);
@@ -143,6 +156,7 @@ const MINIMAL_ELEMENTS: ElementRenderer[] = [
   renderRalph,
   renderUltrawork,
   renderTeam,
+  renderEnterprise,
   renderTurns,
 ];
 
@@ -152,6 +166,7 @@ const FOCUSED_ELEMENTS: ElementRenderer[] = [
   renderUltrawork,
   renderAutopilot,
   renderTeam,
+  renderEnterprise,
   renderTurns,
   renderTokens,
   renderQuota,
@@ -165,6 +180,7 @@ const FULL_ELEMENTS: ElementRenderer[] = [
   renderUltrawork,
   renderAutopilot,
   renderTeam,
+  renderEnterprise,
   renderTurns,
   renderTokens,
   renderQuota,

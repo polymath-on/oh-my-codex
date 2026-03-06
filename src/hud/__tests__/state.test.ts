@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readGitBranch, readRalphState } from '../state.js';
+import { readEnterpriseState, readGitBranch, readRalphState } from '../state.js';
 
 describe('readGitBranch', () => {
   it('returns null in a non-git directory without printing git fatal noise', async () => {
@@ -106,3 +106,29 @@ describe('readRalphState scope precedence', () => {
     }
   });
 });
+
+
+describe('readEnterpriseState', () => {
+  it('reads active enterprise state from the scoped mode file', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'omx-hud-enterprise-'));
+    try {
+      const rootStateDir = join(cwd, '.omx', 'state');
+      await mkdir(rootStateDir, { recursive: true });
+      await writeFile(join(rootStateDir, 'enterprise-state.json'), JSON.stringify({
+        active: true,
+        current_phase: 'enterprise-exec',
+        division_count: 2,
+        subordinate_count: 5,
+        chairman_state: 'working',
+      }));
+
+      const state = await readEnterpriseState(cwd);
+      assert.ok(state);
+      assert.equal(state?.division_count, 2);
+      assert.equal(state?.chairman_state, 'working');
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+

@@ -16,6 +16,7 @@ import type {
   UltraworkStateForHud,
   AutopilotStateForHud,
   TeamStateForHud,
+  EnterpriseStateForHud,
   HudMetrics,
   HudNotifyState,
   HudConfig,
@@ -59,6 +60,11 @@ export async function readAutopilotState(cwd: string): Promise<AutopilotStateFor
 
 export async function readTeamState(cwd: string): Promise<TeamStateForHud | null> {
   const state = await readScopedModeState<TeamStateForHud>(cwd, 'team');
+  return state?.active ? state : null;
+}
+
+export async function readEnterpriseState(cwd: string): Promise<EnterpriseStateForHud | null> {
+  const state = await readScopedModeState<EnterpriseStateForHud>(cwd, 'enterprise');
   return state?.active ? state : null;
 }
 
@@ -114,16 +120,17 @@ export async function readAllState(cwd: string): Promise<HudRenderContext> {
   const version = readVersion();
   const gitBranch = readGitBranch(cwd);
 
-  const [ralph, ultrawork, autopilot, team, metrics, hudNotify, session] =
+  const [ralph, ultrawork, autopilot, team, enterprise, metrics, hudNotify, session] =
     await Promise.all([
       readRalphState(cwd),
       readUltraworkState(cwd),
       readAutopilotState(cwd),
       readTeamState(cwd),
+      readEnterpriseState(cwd),
       readMetrics(cwd),
       readHudNotifyState(cwd),
       readSessionState(cwd),
     ]);
 
-  return { version, gitBranch, ralph, ultrawork, autopilot, team, metrics, hudNotify, session };
+  return { version, gitBranch, ralph, ultrawork, autopilot, team, enterprise, metrics, hudNotify, session };
 }
