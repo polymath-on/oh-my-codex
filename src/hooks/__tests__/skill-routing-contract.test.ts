@@ -13,6 +13,9 @@ describe('skill routing contracts', () => {
 
     assert.match(skill, /default owner:\s*`debugger`/i);
     assert.match(skill, /route to `architect`/i);
+    assert.match(skill, /tie-breaker:.*`debugger`/i);
+    assert.match(skill, /regression, broken, failing, stack trace, crash, flaky, root cause/i);
+    assert.match(skill, /boundaries, interface, dependency impact, architecture, module interaction, tradeoff/i);
     assert.match(skill, /router/i);
   });
 

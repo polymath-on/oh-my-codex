@@ -30,7 +30,18 @@ Investigation work is broader than a single role name. Some requests are bug/roo
 - **Default owner: `debugger`** for failures, regressions, "why is this broken", stack traces, reproduction, and causal diagnosis.
 - **Route to `architect`** for architecture review, interface boundaries, dependency impact, system behavior across modules, and structural diagnosis.
 - **Use `explore` first** when the request is broad and you need a fast file/symbol map before deeper reasoning.
+- **Tie-breaker:** if a request mixes failure diagnosis and architecture concerns, lead with `debugger` unless the dominant need is clearly structural/design-oriented.
 </Routing_Defaults>
+
+<Routing_Signals>
+
+| Signal in request | Route | Why |
+|---|---|---|
+| regression, broken, failing, stack trace, crash, flaky, root cause, why is this broken | `debugger` | Causal diagnosis and reproduction come first |
+| boundaries, interface, dependency impact, architecture, module interaction, tradeoff, system design | `architect` | Structural/system reasoning comes first |
+| broad surface area with unclear files/symbols | `explore` first, then `architect`/`debugger` | Map the code before deep reasoning |
+
+</Routing_Signals>
 
 <Execution_Policy>
 - Treat Analyze as a router, not a standalone public specialist
@@ -45,6 +56,7 @@ Investigation work is broader than a single role name. Some requests are bug/roo
 3. **Route to the canonical owner**:
    - `debugger` for failures, regressions, causality, and reproduction work
    - `architect` for boundaries, tradeoffs, and structural/system analysis
+   - if both appear, prefer `debugger` first unless the user is clearly asking for architectural judgment
 4. **Synthesize findings**: summarize the diagnosis, evidence, remaining uncertainty, and recommended next step
 </Steps>
 
@@ -82,7 +94,7 @@ Why bad: Trust-boundary and OWASP review should go to `security-review`.
 
 <Escalation_And_Stop_Conditions>
 - If analysis shows the real next step is implementation, report findings and recommend executor / `ralph`
-- If the request mixes debugging and architecture, lead with the dominant owner and call out the secondary handoff explicitly
+- If the request mixes debugging and architecture, lead with the dominant owner, use `debugger` as the default tie-breaker, and call out the secondary handoff explicitly
 - If the scope is too broad ("analyze everything"), narrow it before proceeding
 </Escalation_And_Stop_Conditions>
 

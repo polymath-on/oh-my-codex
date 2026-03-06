@@ -19,8 +19,8 @@ export const KEYWORD_TRIGGER_DEFINITIONS: readonly KeywordTriggerDefinition[] = 
   { keyword: 'ulw', skill: 'ultrawork', priority: 10, guidance: 'Activate ultrawork parallel execution mode' },
   { keyword: 'parallel', skill: 'ultrawork', priority: 10, guidance: 'Activate ultrawork parallel execution mode' },
   { keyword: 'ultraqa', skill: 'ultraqa', priority: 8, guidance: 'Activate UltraQA cycling workflow' },
-  { keyword: 'analyze', skill: 'analyze', priority: 7, guidance: 'Activate analysis router (debugger default; architect for structural analysis)' },
-  { keyword: 'investigate', skill: 'analyze', priority: 7, guidance: 'Activate analysis router (debugger default; architect for structural analysis)' },
+  { keyword: 'analyze', skill: 'analyze', priority: 7, guidance: 'Activate analysis router (debugger default/tie-breaker; architect for structural analysis)' },
+  { keyword: 'investigate', skill: 'analyze', priority: 7, guidance: 'Activate analysis router (debugger default/tie-breaker; architect for structural analysis)' },
 
   { keyword: 'deep interview', skill: 'deep-interview', priority: 8, guidance: 'Activate Ouroboros-inspired Socratic ambiguity-gated interview workflow' },
   { keyword: 'gather requirements', skill: 'deep-interview', priority: 8, guidance: 'Activate Ouroboros-inspired Socratic ambiguity-gated interview workflow' },
