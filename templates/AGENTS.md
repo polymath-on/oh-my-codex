@@ -26,10 +26,12 @@ Keep runtime marker contracts stable and non-destructive when overlays are appli
 - Choose the lightest-weight path that preserves quality (direct action, MCP, or agent).
 - Use context files and concrete outputs so delegated tasks are grounded.
 - Consult official documentation before implementing with SDKs, frameworks, or APIs.
+<!-- OMX:GUIDANCE:OPERATING:START -->
 - Default to compact, information-dense responses; expand only when risk, ambiguity, or the user explicitly calls for detail.
 - Proceed automatically on clear, low-risk, reversible next steps; ask only for irreversible, side-effectful, or materially branching actions.
 - Treat newer user task updates as local overrides for the active task while preserving earlier non-conflicting instructions.
 - Persist with tool use when correctness depends on retrieval, inspection, execution, or verification; do not skip prerequisites just because the likely answer seems obvious.
+<!-- OMX:GUIDANCE:OPERATING:END -->
 </operating_principles>
 
 ---
@@ -285,7 +287,13 @@ Sizing guidance:
 - Standard changes: standard verifier
 - Large or security/architectural changes (>20 files): thorough verifier
 
+<!-- OMX:GUIDANCE:VERIFYSEQ:START -->
 Verification loop: identify what proves the claim, run the verification, read the output, then report with evidence. If verification fails, continue iterating rather than reporting incomplete work. Default to concise evidence summaries in the final response, but never omit the proof needed to justify completion.
+
+- Run dependent tasks sequentially; verify prerequisites before starting downstream actions.
+- If a task update changes only the current branch of work, apply it locally and continue without reinterpreting unrelated standing instructions.
+- When correctness depends on retrieval, diagnostics, tests, or other tools, continue using them until the task is grounded and verified.
+<!-- OMX:GUIDANCE:VERIFYSEQ:END -->
 </verification>
 
 <execution_protocols>
