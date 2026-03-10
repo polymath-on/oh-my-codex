@@ -4,7 +4,7 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildMergedConfig, mergeConfig } from "../generator.js";
@@ -545,4 +545,43 @@ describe("config generator idempotency (#384)", () => {
     assert.equal(count(merged, /^\[mcp_servers\.eslint\]$/gm), 1);
   });
 
+});
+
+async function readSourceManifestRaw(): Promise<string> {
+  return readFile(join(process.cwd(), 'src', 'catalog', 'manifest.json'), 'utf-8');
+}
+
+describe('manifest-governed native agent entries', () => {
+  it('emits only installable agent entries when manifest is available', async () => {
+    const wd = await mkdtemp(join(tmpdir(), 'omx-idem-manifest-'));
+    try {
+      await mkdir(join(wd, 'templates'), { recursive: true });
+      await writeFile(join(wd, 'templates', 'catalog-manifest.json'), await readSourceManifestRaw());
+
+      const toml = buildMergedConfig('', wd, {
+        agentsConfigDir: join(wd, 'agents'),
+      });
+
+      assert.match(toml, /^\[agents\.executor\]$/m);
+      assert.match(toml, /^\[agents\."code-simplifier"\]$/m);
+      assert.doesNotMatch(toml, /^\[agents\."style-reviewer"\]$/m);
+      assert.doesNotMatch(toml, /^\[agents\."product-manager"\]$/m);
+    } finally {
+      await rm(wd, { recursive: true, force: true });
+    }
+  });
+});
+
+
+describe('manifest-governed native agent entry fallback', () => {
+  it('falls back to legacy agent entries when manifest is absent', () => {
+    const wd = join(process.cwd(), 'tmp-no-manifest-fallback-marker');
+    const toml = buildMergedConfig('', wd, {
+      agentsConfigDir: join(wd, 'agents'),
+    });
+
+    assert.match(toml, /^\[agents\.executor\]$/m);
+    assert.match(toml, /^\[agents\."style-reviewer"\]$/m);
+    assert.match(toml, /^\[agents\."code-simplifier"\]$/m);
+  });
 });

@@ -15,15 +15,14 @@ function runOmx(
   const testDir = dirname(fileURLToPath(import.meta.url));
   const repoRoot = join(testDir, '..', '..', '..');
   const omxBin = join(repoRoot, 'bin', 'omx.js');
-  const resolvedHome = envOverrides.HOME ?? process.env.HOME;
+  const env = { ...process.env, ...envOverrides };
+  if (envOverrides.HOME && !envOverrides.CODEX_HOME) {
+    env.CODEX_HOME = join(envOverrides.HOME, '.codex');
+  }
   const result = spawnSync(process.execPath, [omxBin, ...argv], {
     cwd,
     encoding: 'utf-8',
-    env: {
-      ...process.env,
-      ...(resolvedHome && !envOverrides.CODEX_HOME ? { CODEX_HOME: join(resolvedHome, '.codex') } : {}),
-      ...envOverrides,
-    },
+    env,
   });
   return {
     status: result.status,
@@ -269,6 +268,54 @@ describe('omx uninstall', () => {
     }
   });
 
+
+
+  it('removes stale previously-managed merged agent configs and sections', async () => {
+    const wd = await mkdtemp(join(tmpdir(), 'omx-uninstall-'));
+    try {
+      const home = join(wd, 'home');
+      const codexDir = join(home, '.codex');
+      const nativeAgentsDir = join(home, '.omx', 'agents');
+      await mkdir(codexDir, { recursive: true });
+      await mkdir(nativeAgentsDir, { recursive: true });
+      await writeFile(
+        join(codexDir, 'config.toml'),
+        buildOmxConfig().replace(
+          [
+            '[agents.executor]',
+            'description = "Code implementation"',
+            'config_file = "/path/to/executor.toml"',
+            '',
+          ].join('\n'),
+          [
+            '[agents.executor]',
+            'description = "Code implementation"',
+            'config_file = "/path/to/executor.toml"',
+            '',
+            '[agents."style-reviewer"]',
+            'description = "Formatting reviewer"',
+            'config_file = "/path/to/style-reviewer.toml"',
+            '',
+          ].join('\n'),
+        ),
+      );
+      await writeFile(join(nativeAgentsDir, 'executor.toml'), 'executor');
+      await writeFile(join(nativeAgentsDir, 'style-reviewer.toml'), 'style-reviewer');
+
+      const res = runOmx(wd, ['uninstall'], { HOME: home });
+      if (shouldSkipForSpawnPermissions(res.error)) return;
+      assert.equal(res.status, 0, res.stderr || res.stdout);
+      assert.match(res.stdout, /Agent entries: 2/);
+      assert.equal(existsSync(join(nativeAgentsDir, 'executor.toml')), false);
+      assert.equal(existsSync(join(nativeAgentsDir, 'style-reviewer.toml')), false);
+
+      const config = await readFile(join(codexDir, 'config.toml'), 'utf-8');
+      assert.doesNotMatch(config, /\[agents\.executor\]/);
+      assert.doesNotMatch(config, /\[agents\."style-reviewer"\]/);
+    } finally {
+      await rm(wd, { recursive: true, force: true });
+    }
+  });
 
   it('preserves seeded model/context keys during uninstall', async () => {
     const wd = await mkdtemp(join(tmpdir(), 'omx-uninstall-'));

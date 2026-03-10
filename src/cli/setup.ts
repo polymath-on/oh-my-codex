@@ -36,10 +36,10 @@ import {
 } from "../config/mcp-registry.js";
 import { generateAgentToml } from "../agents/native-config.js";
 import { AGENT_DEFINITIONS } from "../agents/definitions.js";
+import { getInstallableAgentNames, getManagedAgentNames, tryReadCatalogManifest } from "../catalog/reader.js";
 import { getPackageRoot } from "../utils/package.js";
 import { readSessionState, isSessionStale } from "../hooks/session.js";
 import { getCatalogHeadlineCounts } from "./catalog-contract.js";
-import { tryReadCatalogManifest } from "../catalog/reader.js";
 import { DEFAULT_FRONTIER_MODEL } from "../config/models.js";
 import {
   addGeneratedAgentsMarker,
@@ -956,30 +956,22 @@ async function refreshNativeAgentConfigs(
   options: Pick<SetupOptions, "dryRun" | "verbose" | "force">,
 ): Promise<SetupCategorySummary> {
   const summary = createEmptyCategorySummary();
+  const manifest = tryReadCatalogManifest(pkgRoot);
+  const installableAgentNames = manifest
+    ? new Set(getInstallableAgentNames(pkgRoot))
+    : null;
+  const managedAgentNames = new Set<string>(getManagedAgentNames(pkgRoot));
 
   if (!options.dryRun) {
     await mkdir(agentsDir, { recursive: true });
   }
 
-  const manifest = tryReadCatalogManifest();
-  const agentStatusByName = manifest
-    ? new Map(manifest.agents.map((agent) => [agent.name, agent.status]))
-    : null;
-  const isInstallableStatus = (status: string | undefined): boolean =>
-    status === "active" || status === "internal";
-  const staleCandidateNativeAgentNames = new Set(
-    manifest?.agents.map((agent) => agent.name) ?? [],
-  );
-
   for (const [name, agent] of Object.entries(AGENT_DEFINITIONS)) {
-    staleCandidateNativeAgentNames.add(name);
-    const status = agentStatusByName?.get(name);
-    if (agentStatusByName && !isInstallableStatus(status)) {
-      if (options.verbose) {
-        const label = status ?? "unlisted";
-        console.log(`  skipped native agent ${name}.toml (status: ${label})`);
-      }
+    if (installableAgentNames && !installableAgentNames.has(name)) {
       summary.skipped += 1;
+      if (options.verbose) {
+        console.log(`  skipped ${name}.toml (status: non-installable)`);
+      }
       continue;
     }
 
@@ -1001,26 +993,20 @@ async function refreshNativeAgentConfigs(
     );
   }
 
-  if (options.force && manifest && existsSync(agentsDir)) {
-    const installedFiles = await readdir(agentsDir);
-    for (const file of installedFiles) {
-      if (!file.endsWith('.toml')) continue;
-      const agentName = file.slice(0, -5);
-      const status = agentStatusByName?.get(agentName);
-      if (isInstallableStatus(status)) continue;
-      if (!staleCandidateNativeAgentNames.has(agentName) && status === undefined) continue;
+  if (manifest && existsSync(agentsDir)) {
+    const currentEntries = await readdir(agentsDir, { withFileTypes: true });
+    for (const entry of currentEntries) {
+      if (!entry.isFile() || !entry.name.endsWith('.toml')) continue;
+      const name = entry.name.slice(0, -'.toml'.length);
+      if (!managedAgentNames.has(name) || installableAgentNames?.has(name)) continue;
 
-      const staleAgentPath = join(agentsDir, file);
-      if (!existsSync(staleAgentPath)) continue;
-
+      const dst = join(agentsDir, entry.name);
       if (!options.dryRun) {
-        await rm(staleAgentPath, { force: true });
+        await rm(dst, { force: true });
       }
       summary.removed += 1;
       if (options.verbose) {
-        const prefix = options.dryRun ? 'would remove stale native agent' : 'removed stale native agent';
-        const label = status ?? 'unlisted';
-        console.log(`  ${prefix} ${file} (status: ${label})`);
+        console.log(`  ${options.dryRun ? 'would remove stale' : 'removed stale'} native agent ${entry.name}`);
       }
     }
   }

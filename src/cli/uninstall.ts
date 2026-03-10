@@ -11,7 +11,7 @@ import {
   stripOmxFeatureFlags,
 } from '../config/generator.js';
 import { getPackageRoot } from '../utils/package.js';
-import { AGENT_DEFINITIONS } from '../agents/definitions.js';
+import { getManagedAgentNames } from '../catalog/reader.js';
 import { resolveScopeDirectories, type SetupScope } from './setup.js';
 import { readPersistedSetupScope } from './index.js';
 import { isOmxGeneratedAgentsMd } from '../utils/agents-md.js';
@@ -40,7 +40,7 @@ interface UninstallSummary {
 
 const OMX_MCP_SERVERS = ['omx_state', 'omx_memory', 'omx_code_intel', 'omx_trace'];
 
-function detectOmxConfigArtifacts(config: string): {
+function detectOmxConfigArtifacts(config: string, managedAgentNames: readonly string[]): {
   hasMcpServers: string[];
   hasAgentEntries: number;
   hasTuiSection: boolean;
@@ -51,7 +51,7 @@ function detectOmxConfigArtifacts(config: string): {
     new RegExp(`\\[mcp_servers\\.${name}\\]`).test(config)
   );
 
-  const agentNames = Object.keys(AGENT_DEFINITIONS);
+  const agentNames = managedAgentNames;
   let hasAgentEntries = 0;
   for (const name of agentNames) {
     const tableKey = name.includes('-') ? `agents."${name}"` : `agents.${name}`;
@@ -77,7 +77,7 @@ function detectOmxConfigArtifacts(config: string): {
 
 async function cleanConfig(
   configPath: string,
-  options: Pick<UninstallOptions, 'dryRun' | 'verbose'>,
+  options: Pick<UninstallOptions, 'dryRun' | 'verbose'> & { managedAgentNames: readonly string[] },
 ): Promise<Pick<UninstallSummary,
   'configCleaned' | 'mcpServersRemoved' | 'agentEntriesRemoved' |
   'tuiSectionRemoved' | 'topLevelKeysRemoved' | 'featureFlagsRemoved'
@@ -97,7 +97,7 @@ async function cleanConfig(
   }
 
   const original = await readFile(configPath, 'utf-8');
-  const detected = detectOmxConfigArtifacts(original);
+  const detected = detectOmxConfigArtifacts(original, options.managedAgentNames);
 
   result.mcpServersRemoved = detected.hasMcpServers;
   result.agentEntriesRemoved = detected.hasAgentEntries;
@@ -188,12 +188,12 @@ async function removeInstalledSkills(
 
 async function removeAgentConfigs(
   agentsDir: string,
-  options: Pick<UninstallOptions, 'dryRun' | 'verbose'>,
+  options: Pick<UninstallOptions, 'dryRun' | 'verbose'> & { managedAgentNames: readonly string[] },
 ): Promise<number> {
   if (!existsSync(agentsDir)) return 0;
 
   let removed = 0;
-  const agentNames = Object.keys(AGENT_DEFINITIONS);
+  const agentNames = options.managedAgentNames;
 
   for (const name of agentNames) {
     const configFile = join(agentsDir, `${name}.toml`);
@@ -336,6 +336,8 @@ export async function uninstall(options: UninstallOptions = {}): Promise<void> {
   }
   console.log(`Resolved scope: ${scope}\n`);
 
+  const managedAgentNames = getManagedAgentNames(pkgRoot);
+
   const summary: UninstallSummary = {
     configCleaned: false,
     mcpServersRemoved: [],
@@ -355,7 +357,7 @@ export async function uninstall(options: UninstallOptions = {}): Promise<void> {
     console.log('[1/5] Skipping config.toml cleanup (--keep-config).');
   } else {
     console.log('[1/5] Cleaning config.toml...');
-    const configResult = await cleanConfig(scopeDirs.codexConfigFile, { dryRun, verbose });
+    const configResult = await cleanConfig(scopeDirs.codexConfigFile, { dryRun, verbose, managedAgentNames });
     Object.assign(summary, configResult);
   }
   console.log();
@@ -368,7 +370,7 @@ export async function uninstall(options: UninstallOptions = {}): Promise<void> {
 
   // Step 3: Remove native agent configs
   console.log('[3/5] Removing native agent configs...');
-  summary.agentConfigsRemoved = await removeAgentConfigs(scopeDirs.nativeAgentsDir, { dryRun, verbose });
+  summary.agentConfigsRemoved = await removeAgentConfigs(scopeDirs.nativeAgentsDir, { dryRun, verbose, managedAgentNames });
   console.log(`  ${dryRun ? 'Would remove' : 'Removed'} ${summary.agentConfigsRemoved} agent config(s).`);
   console.log();
 

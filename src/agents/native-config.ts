@@ -6,8 +6,9 @@
 import { existsSync } from 'fs';
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
-import { AGENT_DEFINITIONS, AgentDefinition } from './definitions.js';
+import { getInstallableAgentDefinitions } from '../catalog/reader.js';
 import { omxAgentsConfigDir } from '../utils/paths.js';
+import { AgentDefinition } from './definitions.js';
 
 const POSTURE_OVERLAYS: Record<AgentDefinition['posture'], string> = {
   'frontier-orchestrator': [
@@ -113,6 +114,7 @@ function escapeTomlMultiline(s: string): string {
   return s.replace(/"{3,}/g, (match) => match.split('').join('\\'));
 }
 
+
 /**
  * Generate TOML content for a single agent config file
  */
@@ -152,7 +154,7 @@ export async function installNativeAgentConfigs(
 
   let count = 0;
 
-  for (const [name, agent] of Object.entries(AGENT_DEFINITIONS)) {
+  for (const [name, agent] of getInstallableAgentDefinitions(pkgRoot)) {
     const promptPath = join(pkgRoot, 'prompts', `${name}.md`);
     if (!existsSync(promptPath)) {
       if (verbose) console.log(`  skip ${name} (no prompt file)`);

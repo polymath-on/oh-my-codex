@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { readCatalogManifest, toPublicCatalogContract } from '../reader.js';
+import { getInstallableCatalogAgentNames, getManagedAgentNames, readCatalogManifest, toPublicCatalogContract } from '../reader.js';
 
 async function readSourceManifestRaw(): Promise<string> {
   return readFile(join(process.cwd(), 'src', 'catalog', 'manifest.json'), 'utf8');
@@ -30,6 +30,18 @@ describe('catalog reader/contract', () => {
     const parsed = readCatalogManifest(root);
     assert.equal(parsed.schemaVersion, 1);
     assert.ok(parsed.skills.length > 0);
+  });
+
+  it('derives installable vs managed agent names from manifest lifecycle state', () => {
+    const manifest = readCatalogManifest();
+    const installable = new Set(getInstallableCatalogAgentNames(manifest));
+    const managed = new Set(getManagedAgentNames(manifest));
+
+    assert.ok(installable.has('executor'));
+    assert.ok(installable.has('code-simplifier'));
+    assert.ok(!installable.has('style-reviewer'));
+    assert.ok(!installable.has('product-manager'));
+    assert.ok(managed.has('style-reviewer'));
   });
 
   it('builds public contract with aliases and internalHidden', async () => {
