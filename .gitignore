@@ -15,6 +15,3 @@ dist/
 .agents/
 coverage/
 target/
-bin/omx-explore-harness
-bin/omx-explore-harness.exe
-bin/omx-explore-harness.meta.json

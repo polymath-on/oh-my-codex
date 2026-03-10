@@ -288,13 +288,6 @@ describe('resolveTeamWorkerLaunchArgsEnv (spark)', () => {
 });
 
 describe('resolveCliInvocation', () => {
-  it('resolves explore to explore command', () => {
-    assert.deepEqual(resolveCliInvocation(['explore', '--prompt', 'find', 'auth']), {
-      command: 'explore',
-      launchArgs: [],
-    });
-  });
-
   it('resolves ask to ask command', () => {
     assert.deepEqual(resolveCliInvocation(['ask', 'claude', 'hello']), {
       command: 'ask',
