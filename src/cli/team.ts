@@ -18,7 +18,7 @@ import {
   executeTeamApiOperation,
   type TeamApiOperation,
 } from '../team/api-interop.js';
-import { teamReadConfig as readTeamConfig } from '../team/team-ops.js';
+import { teamReadConfig as readTeamConfig, teamReadTaskApproval as readTaskApproval } from '../team/team-ops.js';
 
 type TeamWorkerCli = Exclude<WorkerInfo['worker_cli'], undefined>;
 
@@ -319,11 +319,12 @@ function buildDeadWorkerAwaitEvent(teamName: string, snapshot: TeamSnapshot): Te
   };
 }
 
-function readTeamPaneStatus(
+async function readTeamPaneStatus(
   config: Awaited<ReturnType<typeof readTeamConfig>>,
-  snapshot?: Pick<TeamSnapshot, 'deadWorkers' | 'nonReportingWorkers' | 'workers' | 'tasks'>,
+  cwd: string = process.cwd(),
+  snapshot?: Pick<TeamSnapshot, 'teamName' | 'deadWorkers' | 'nonReportingWorkers' | 'workers' | 'tasks'>,
   tailLines: number = DEFAULT_SPARKSHELL_TAIL_LINES,
-): {
+): Promise<{
   leader_pane_id: string | null;
   hud_pane_id: string | null;
   worker_panes: Record<string, string>;
@@ -350,6 +351,8 @@ function readTeamPaneStatus(
   recommended_inspect_descriptions: Record<string, string | null>;
   recommended_inspect_blocked_by: Record<string, string[]>;
   recommended_inspect_task_roles: Record<string, string | null>;
+  recommended_inspect_approval_statuses: Record<string, string | null>;
+  recommended_inspect_approval_reviewers: Record<string, string | null>;
   recommended_inspect_states: Record<string, WorkerStatus['state'] | null>;
   recommended_inspect_tasks: Record<string, string | null>;
   recommended_inspect_subjects: Record<string, string | null>;
@@ -379,13 +382,15 @@ function readTeamPaneStatus(
     task_description: string | null;
     blocked_by: string[];
     task_role: string | null;
+    approval_status: string | null;
+    approval_reviewer: string | null;
     reason: string;
     state: WorkerStatus['state'] | null;
     task_id: string | null;
     task_subject: string | null;
     command: string;
   }>;
-} {
+}> {
   if (!config) {
     return {
       leader_pane_id: null,
@@ -414,6 +419,8 @@ function readTeamPaneStatus(
       recommended_inspect_descriptions: {},
       recommended_inspect_blocked_by: {},
       recommended_inspect_task_roles: {},
+      recommended_inspect_approval_statuses: {},
+      recommended_inspect_approval_reviewers: {},
       recommended_inspect_states: {},
       recommended_inspect_tasks: {},
       recommended_inspect_subjects: {},
@@ -585,6 +592,22 @@ function readTeamPaneStatus(
       return [target, taskId ? (taskRoleById.get(taskId) ?? null) : null];
     }),
   );
+  const approvalRecordByTaskId = new Map<string, Awaited<ReturnType<typeof readTaskApproval>>>();
+  for (const taskId of new Set(Object.values(recommendedInspectTasks).filter((value): value is string => typeof value === 'string' && value.length > 0))) {
+    approvalRecordByTaskId.set(taskId, snapshot?.teamName ? await readTaskApproval(snapshot.teamName, taskId, cwd) : null);
+  }
+  const recommendedInspectApprovalStatuses = Object.fromEntries(
+    recommendedInspectTargets.map((target) => {
+      const taskId = recommendedInspectTasks[target];
+      return [target, taskId ? (approvalRecordByTaskId.get(taskId)?.status ?? null) : null];
+    }),
+  );
+  const recommendedInspectApprovalReviewers = Object.fromEntries(
+    recommendedInspectTargets.map((target) => {
+      const taskId = recommendedInspectTasks[target];
+      return [target, taskId ? (approvalRecordByTaskId.get(taskId)?.reviewer ?? null) : null];
+    }),
+  );
   const recommendedInspectPanes = Object.fromEntries(
     recommendedInspectTargets.map((target) => [target, workerPanes[target] ?? null]),
   );
@@ -654,6 +677,8 @@ function readTeamPaneStatus(
         task_description: recommendedInspectDescriptions[target] ?? null,
         blocked_by: recommendedInspectBlockedBy[target] ?? [],
         task_role: recommendedInspectTaskRoles[target] ?? null,
+        approval_status: recommendedInspectApprovalStatuses[target] ?? null,
+        approval_reviewer: recommendedInspectApprovalReviewers[target] ?? null,
         reason: recommendedInspectReasons[target] ?? 'unknown',
         state: recommendedInspectStates[target] ?? null,
         task_id: recommendedInspectTasks[target] ?? null,
@@ -661,34 +686,7 @@ function readTeamPaneStatus(
         command,
       };
     })
-    .filter((item): item is {
-      target: string;
-      pane_id: string;
-      worker_cli: TeamWorkerCli | null;
-      role: string | null;
-      index: number | null;
-      alive: boolean | null;
-      turn_count: number | null;
-      turns_without_progress: number | null;
-      last_turn_at: string | null;
-      status_updated_at: string | null;
-      pid: number | null;
-      worktree_path: string | null;
-      worktree_branch: string | null;
-      worktree_detached: boolean | null;
-      working_dir: string | null;
-      assigned_tasks: string[];
-      task_status: TeamTask['status'] | null;
-      requires_code_change: boolean | null;
-      task_description: string | null;
-      blocked_by: string[];
-      task_role: string | null;
-      reason: string;
-      state: WorkerStatus['state'] | null;
-      task_id: string | null;
-      task_subject: string | null;
-      command: string;
-    } => item !== null);
+    .filter((item): item is Exclude<typeof item, null> => item !== null);
 
   return {
     leader_pane_id: leaderPaneId,
@@ -719,6 +717,8 @@ function readTeamPaneStatus(
     recommended_inspect_descriptions: recommendedInspectDescriptions,
     recommended_inspect_blocked_by: recommendedInspectBlockedBy,
     recommended_inspect_task_roles: recommendedInspectTaskRoles,
+    recommended_inspect_approval_statuses: recommendedInspectApprovalStatuses,
+    recommended_inspect_approval_reviewers: recommendedInspectApprovalReviewers,
     recommended_inspect_states: recommendedInspectStates,
     recommended_inspect_tasks: recommendedInspectTasks,
     recommended_inspect_subjects: recommendedInspectSubjects,
@@ -731,7 +731,7 @@ function readTeamPaneStatus(
 }
 
 function renderTeamPaneStatus(
-  paneStatus: ReturnType<typeof readTeamPaneStatus>,
+  paneStatus: Awaited<ReturnType<typeof readTeamPaneStatus>>,
 ): void {
   if (paneStatus.leader_pane_id || paneStatus.hud_pane_id) {
     console.log(`panes: leader=${paneStatus.leader_pane_id || '-'} hud=${paneStatus.hud_pane_id || '-'}`);
@@ -847,6 +847,16 @@ function renderTeamPaneStatus(
       console.log(`inspect_task_role_${target}: ${taskRole}`);
     }
   }
+  for (const [target, approvalStatus] of Object.entries(paneStatus.recommended_inspect_approval_statuses)) {
+    if (approvalStatus) {
+      console.log(`inspect_approval_status_${target}: ${approvalStatus}`);
+    }
+  }
+  for (const [target, approvalReviewer] of Object.entries(paneStatus.recommended_inspect_approval_reviewers)) {
+    if (approvalReviewer) {
+      console.log(`inspect_approval_reviewer_${target}: ${approvalReviewer}`);
+    }
+  }
   for (const [target, state] of Object.entries(paneStatus.recommended_inspect_states)) {
     if (state) {
       console.log(`inspect_state_${target}: ${state}`);
@@ -903,10 +913,12 @@ function renderTeamPaneStatus(
     const taskDescriptionPart = item.task_description ? ` description=${item.task_description}` : '';
     const blockedByPart = item.blocked_by.length > 0 ? ` blocked_by=${item.blocked_by.join(',')}` : '';
     const taskRolePart = item.task_role ? ` task_role=${item.task_role}` : '';
+    const approvalStatusPart = item.approval_status ? ` approval_status=${item.approval_status}` : '';
+    const approvalReviewerPart = item.approval_reviewer ? ` approval_reviewer=${item.approval_reviewer}` : '';
     const statePart = item.state ? ` state=${item.state}` : '';
     const taskPart = item.task_id ? ` task=${item.task_id}` : '';
     const subjectPart = item.task_subject ? ` subject=${item.task_subject}` : '';
-    console.log(`inspect_item_${index + 1}: target=${item.target}${panePart}${cliPart}${rolePart}${indexPart}${alivePart}${turnCountPart}${turnsWithoutProgressPart}${lastTurnPart}${statusUpdatedPart}${pidPart}${worktreePathPart}${worktreeBranchPart}${worktreeDetachedPart}${workdirPart}${assignedTasksPart}${taskStatusPart}${requiresCodeChangePart}${taskDescriptionPart}${blockedByPart}${taskRolePart} reason=${item.reason}${statePart}${taskPart}${subjectPart} command=${item.command}`);
+    console.log(`inspect_item_${index + 1}: target=${item.target}${panePart}${cliPart}${rolePart}${indexPart}${alivePart}${turnCountPart}${turnsWithoutProgressPart}${lastTurnPart}${statusUpdatedPart}${pidPart}${worktreePathPart}${worktreeBranchPart}${worktreeDetachedPart}${workdirPart}${assignedTasksPart}${taskStatusPart}${requiresCodeChangePart}${taskDescriptionPart}${blockedByPart}${taskRolePart}${approvalStatusPart}${approvalReviewerPart} reason=${item.reason}${statePart}${taskPart}${subjectPart} command=${item.command}`);
   }
 
   for (const [target, command] of Object.entries(paneStatus.sparkshell_commands)) {
@@ -1376,7 +1388,7 @@ export async function teamCommand(args: string[], options: TeamCliOptions = {}):
       return;
     }
     const tailLines = parseStatusTailLines(teamArgs.slice(2));
-    const paneStatus = readTeamPaneStatus(await readTeamConfig(name, cwd), snapshot, tailLines);
+    const paneStatus = await readTeamPaneStatus(await readTeamConfig(name, cwd), cwd, snapshot, tailLines);
     if (wantsJson) {
       console.log(JSON.stringify({
         ...buildJsonBase(),
