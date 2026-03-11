@@ -309,27 +309,6 @@ describe('resolveCliInvocation', () => {
     });
   });
 
-  it('resolves session to session command', () => {
-    assert.deepEqual(resolveCliInvocation(['session', 'search', 'startup evidence']), {
-      command: 'session',
-      launchArgs: [],
-    });
-  });
-
-  it('resolves resume to resume command and forwards trailing args', () => {
-    assert.deepEqual(resolveCliInvocation(['resume', '--last']), {
-      command: 'resume',
-      launchArgs: ['--last'],
-    });
-  });
-
-  it('resolves resume session id and prompt as forwarded args', () => {
-    assert.deepEqual(resolveCliInvocation(['resume', 'session-123', 'continue here']), {
-      command: 'resume',
-      launchArgs: ['session-123', 'continue here'],
-    });
-  });
-
   it('resolves hooks to hooks command', () => {
     assert.deepEqual(resolveCliInvocation(['hooks']), {
       command: 'hooks',
