@@ -200,6 +200,13 @@ ${required}${optional}${note}Example:
 `.trim();
 }
 
+function buildJsonBase(): { schema_version: string; timestamp: string } {
+  return {
+    schema_version: '1.0',
+    timestamp: new Date().toISOString(),
+  };
+}
+
 export interface ParsedTeamStartArgs {
   parsed: ParsedTeamArgs;
   worktreeMode: WorktreeMode;
@@ -760,10 +767,7 @@ export async function teamCommand(args: string[], options: TeamCliOptions = {}):
       }
     }
     const wantsJson = teamArgs.includes('--json');
-    const jsonBase = {
-      schema_version: '1.0',
-      timestamp: new Date().toISOString(),
-    };
+    const jsonBase = buildJsonBase();
     let parsedApi: ReturnType<typeof parseTeamApiArgs>;
     try {
       parsedApi = parseTeamApiArgs(teamArgs.slice(1));
@@ -812,6 +816,8 @@ export async function teamCommand(args: string[], options: TeamCliOptions = {}):
     if (!snapshot) {
       if (wantsJson) {
         console.log(JSON.stringify({
+          ...buildJsonBase(),
+          command: 'omx team status',
           team_name: name,
           status: 'missing',
         }));
@@ -823,6 +829,8 @@ export async function teamCommand(args: string[], options: TeamCliOptions = {}):
     const paneStatus = readTeamPaneStatus(await readTeamConfig(name, cwd));
     if (wantsJson) {
       console.log(JSON.stringify({
+        ...buildJsonBase(),
+        command: 'omx team status',
         team_name: snapshot.teamName,
         status: 'ok',
         phase: snapshot.phase,

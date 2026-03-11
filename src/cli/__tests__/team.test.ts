@@ -696,6 +696,9 @@ describe('teamCommand status', () => {
       await teamCommand(['status', 'pane-json-team', '--json']);
 
       const payload = JSON.parse(logs.at(-1) ?? '{}') as {
+        schema_version?: string;
+        timestamp?: string;
+        command?: string;
         team_name?: string;
         status?: string;
         panes?: {
@@ -706,6 +709,9 @@ describe('teamCommand status', () => {
           sparkshell_commands?: Record<string, string>;
         };
       };
+      assert.equal(payload.schema_version, '1.0');
+      assert.equal(typeof payload.timestamp, 'string');
+      assert.equal(payload.command, 'omx team status');
       assert.equal(payload.team_name, 'pane-json-team');
       assert.equal(payload.status, 'ok');
       assert.equal(payload.panes?.leader_pane_id, '%30');
@@ -735,9 +741,15 @@ describe('teamCommand status', () => {
       await teamCommand(['status', 'missing-team', '--json']);
 
       const payload = JSON.parse(logs.at(-1) ?? '{}') as {
+        schema_version?: string;
+        timestamp?: string;
+        command?: string;
         team_name?: string;
         status?: string;
       };
+      assert.equal(payload.schema_version, '1.0');
+      assert.equal(typeof payload.timestamp, 'string');
+      assert.equal(payload.command, 'omx team status');
       assert.equal(payload.team_name, 'missing-team');
       assert.equal(payload.status, 'missing');
     } finally {
