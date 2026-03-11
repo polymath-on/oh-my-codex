@@ -335,6 +335,7 @@ function readTeamPaneStatus(
   recommended_inspect_roles: Record<string, string | null>;
   recommended_inspect_alive: Record<string, boolean | null>;
   recommended_inspect_turn_counts: Record<string, number | null>;
+  recommended_inspect_turns_without_progress: Record<string, number | null>;
   recommended_inspect_last_turn_at: Record<string, string | null>;
   recommended_inspect_status_updated_at: Record<string, string | null>;
   recommended_inspect_pids: Record<string, number | null>;
@@ -355,6 +356,7 @@ function readTeamPaneStatus(
     role: string | null;
     alive: boolean | null;
     turn_count: number | null;
+    turns_without_progress: number | null;
     last_turn_at: string | null;
     status_updated_at: string | null;
     pid: number | null;
@@ -381,6 +383,7 @@ function readTeamPaneStatus(
       recommended_inspect_roles: {},
       recommended_inspect_alive: {},
       recommended_inspect_turn_counts: {},
+      recommended_inspect_turns_without_progress: {},
       recommended_inspect_last_turn_at: {},
       recommended_inspect_status_updated_at: {},
       recommended_inspect_pids: {},
@@ -457,6 +460,12 @@ function readTeamPaneStatus(
       return [target, worker?.heartbeat?.turn_count ?? null];
     }),
   );
+  const recommendedInspectTurnsWithoutProgress = Object.fromEntries(
+    recommendedInspectTargets.map((target) => {
+      const worker = snapshot?.workers.find((candidate) => candidate.name === target);
+      return [target, worker?.turnsWithoutProgress ?? null];
+    }),
+  );
   const recommendedInspectLastTurnAt = Object.fromEntries(
     recommendedInspectTargets.map((target) => {
       const worker = snapshot?.workers.find((candidate) => candidate.name === target);
@@ -528,6 +537,9 @@ function readTeamPaneStatus(
       recommendedInspectClis[recommendedInspectTargets[0]!] ? `cli=${recommendedInspectClis[recommendedInspectTargets[0]!]}` : '',
       recommendedInspectRoles[recommendedInspectTargets[0]!] ? `role=${recommendedInspectRoles[recommendedInspectTargets[0]!]}` : '',
       typeof recommendedInspectAlive[recommendedInspectTargets[0]!] === 'boolean' ? `alive=${recommendedInspectAlive[recommendedInspectTargets[0]!]}` : '',
+      typeof recommendedInspectTurnCounts[recommendedInspectTargets[0]!] === 'number' ? `turn_count=${recommendedInspectTurnCounts[recommendedInspectTargets[0]!]}` : '',
+      typeof recommendedInspectTurnsWithoutProgress[recommendedInspectTargets[0]!] === 'number'
+        ? `turns_without_progress=${recommendedInspectTurnsWithoutProgress[recommendedInspectTargets[0]!]}` : '',
       recommendedInspectReasons[recommendedInspectTargets[0]!] ? `reason=${recommendedInspectReasons[recommendedInspectTargets[0]!]}` : '',
       recommendedInspectStates[recommendedInspectTargets[0]!] ? `state=${recommendedInspectStates[recommendedInspectTargets[0]!]}` : '',
       recommendedInspectTasks[recommendedInspectTargets[0]!] ? `task=${recommendedInspectTasks[recommendedInspectTargets[0]!]}` : '',
@@ -550,6 +562,7 @@ function readTeamPaneStatus(
         role: recommendedInspectRoles[target] ?? null,
         alive: recommendedInspectAlive[target] ?? null,
         turn_count: recommendedInspectTurnCounts[target] ?? null,
+        turns_without_progress: recommendedInspectTurnsWithoutProgress[target] ?? null,
         last_turn_at: recommendedInspectLastTurnAt[target] ?? null,
         status_updated_at: recommendedInspectStatusUpdatedAt[target] ?? null,
         pid: recommendedInspectPids[target] ?? null,
@@ -570,6 +583,7 @@ function readTeamPaneStatus(
       role: string | null;
       alive: boolean | null;
       turn_count: number | null;
+      turns_without_progress: number | null;
       last_turn_at: string | null;
       status_updated_at: string | null;
       pid: number | null;
@@ -597,6 +611,7 @@ function readTeamPaneStatus(
     recommended_inspect_roles: recommendedInspectRoles,
     recommended_inspect_alive: recommendedInspectAlive,
     recommended_inspect_turn_counts: recommendedInspectTurnCounts,
+    recommended_inspect_turns_without_progress: recommendedInspectTurnsWithoutProgress,
     recommended_inspect_last_turn_at: recommendedInspectLastTurnAt,
     recommended_inspect_status_updated_at: recommendedInspectStatusUpdatedAt,
     recommended_inspect_pids: recommendedInspectPids,
@@ -654,6 +669,11 @@ function renderTeamPaneStatus(
   for (const [target, turnCount] of Object.entries(paneStatus.recommended_inspect_turn_counts)) {
     if (typeof turnCount === 'number') {
       console.log(`inspect_turn_count_${target}: ${turnCount}`);
+    }
+  }
+  for (const [target, turnsWithoutProgress] of Object.entries(paneStatus.recommended_inspect_turns_without_progress)) {
+    if (typeof turnsWithoutProgress === 'number') {
+      console.log(`inspect_turns_without_progress_${target}: ${turnsWithoutProgress}`);
     }
   }
   for (const [target, lastTurnAt] of Object.entries(paneStatus.recommended_inspect_last_turn_at)) {
@@ -721,6 +741,9 @@ function renderTeamPaneStatus(
     const rolePart = item.role ? ` role=${item.role}` : '';
     const alivePart = typeof item.alive === 'boolean' ? ` alive=${item.alive}` : '';
     const turnCountPart = typeof item.turn_count === 'number' ? ` turn_count=${item.turn_count}` : '';
+    const turnsWithoutProgressPart = typeof item.turns_without_progress === 'number'
+      ? ` turns_without_progress=${item.turns_without_progress}`
+      : '';
     const lastTurnPart = item.last_turn_at ? ` last_turn_at=${item.last_turn_at}` : '';
     const statusUpdatedPart = item.status_updated_at ? ` status_updated_at=${item.status_updated_at}` : '';
     const pidPart = typeof item.pid === 'number' ? ` pid=${item.pid}` : '';
@@ -730,7 +753,7 @@ function renderTeamPaneStatus(
     const statePart = item.state ? ` state=${item.state}` : '';
     const taskPart = item.task_id ? ` task=${item.task_id}` : '';
     const subjectPart = item.task_subject ? ` subject=${item.task_subject}` : '';
-    console.log(`inspect_item_${index + 1}: target=${item.target}${panePart}${cliPart}${rolePart}${alivePart}${turnCountPart}${lastTurnPart}${statusUpdatedPart}${pidPart}${worktreePathPart}${worktreeBranchPart}${workdirPart} reason=${item.reason}${statePart}${taskPart}${subjectPart} command=${item.command}`);
+    console.log(`inspect_item_${index + 1}: target=${item.target}${panePart}${cliPart}${rolePart}${alivePart}${turnCountPart}${turnsWithoutProgressPart}${lastTurnPart}${statusUpdatedPart}${pidPart}${worktreePathPart}${worktreeBranchPart}${workdirPart} reason=${item.reason}${statePart}${taskPart}${subjectPart} command=${item.command}`);
   }
 
   for (const [target, command] of Object.entries(paneStatus.sparkshell_commands)) {
