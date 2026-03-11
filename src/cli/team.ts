@@ -350,6 +350,8 @@ async function readTeamPaneStatus(
   recommended_inspect_task_results: Record<string, string | null>;
   recommended_inspect_task_errors: Record<string, string | null>;
   recommended_inspect_task_versions: Record<string, number | null>;
+  recommended_inspect_task_created_at: Record<string, string | null>;
+  recommended_inspect_task_completed_at: Record<string, string | null>;
   recommended_inspect_requires_code_change: Record<string, boolean | null>;
   recommended_inspect_descriptions: Record<string, string | null>;
   recommended_inspect_blocked_by: Record<string, string[]>;
@@ -385,6 +387,8 @@ async function readTeamPaneStatus(
     task_result: string | null;
     task_error: string | null;
     task_version: number | null;
+    task_created_at: string | null;
+    task_completed_at: string | null;
     requires_code_change: boolean | null;
     task_description: string | null;
     blocked_by: string[];
@@ -426,6 +430,8 @@ async function readTeamPaneStatus(
       recommended_inspect_task_results: {},
       recommended_inspect_task_errors: {},
       recommended_inspect_task_versions: {},
+      recommended_inspect_task_created_at: {},
+      recommended_inspect_task_completed_at: {},
       recommended_inspect_requires_code_change: {},
       recommended_inspect_descriptions: {},
       recommended_inspect_blocked_by: {},
@@ -573,6 +579,8 @@ async function readTeamPaneStatus(
   const taskResultById = new Map((snapshot?.tasks.items ?? []).map((task) => [task.id, task.result ?? null] as const));
   const taskErrorById = new Map((snapshot?.tasks.items ?? []).map((task) => [task.id, task.error ?? null] as const));
   const taskVersionById = new Map((snapshot?.tasks.items ?? []).map((task) => [task.id, task.version ?? null] as const));
+  const taskCreatedAtById = new Map((snapshot?.tasks.items ?? []).map((task) => [task.id, task.created_at ?? null] as const));
+  const taskCompletedAtById = new Map((snapshot?.tasks.items ?? []).map((task) => [task.id, task.completed_at ?? null] as const));
   const taskRequiresCodeChangeById = new Map((snapshot?.tasks.items ?? []).map((task) => [task.id, task.requires_code_change ?? null] as const));
   const recommendedInspectTaskStatuses = Object.fromEntries(
     recommendedInspectTargets.map((target) => {
@@ -596,6 +604,18 @@ async function readTeamPaneStatus(
     recommendedInspectTargets.map((target) => {
       const taskId = recommendedInspectTasks[target];
       return [target, taskId ? (taskVersionById.get(taskId) ?? null) : null];
+    }),
+  );
+  const recommendedInspectTaskCreatedAt = Object.fromEntries(
+    recommendedInspectTargets.map((target) => {
+      const taskId = recommendedInspectTasks[target];
+      return [target, taskId ? (taskCreatedAtById.get(taskId) ?? null) : null];
+    }),
+  );
+  const recommendedInspectTaskCompletedAt = Object.fromEntries(
+    recommendedInspectTargets.map((target) => {
+      const taskId = recommendedInspectTasks[target];
+      return [target, taskId ? (taskCompletedAtById.get(taskId) ?? null) : null];
     }),
   );
   const recommendedInspectRequiresCodeChange = Object.fromEntries(
@@ -716,6 +736,8 @@ async function readTeamPaneStatus(
         task_result: recommendedInspectTaskResults[target] ?? null,
         task_error: recommendedInspectTaskErrors[target] ?? null,
         task_version: recommendedInspectTaskVersions[target] ?? null,
+        task_created_at: recommendedInspectTaskCreatedAt[target] ?? null,
+        task_completed_at: recommendedInspectTaskCompletedAt[target] ?? null,
         requires_code_change: recommendedInspectRequiresCodeChange[target] ?? null,
         task_description: recommendedInspectDescriptions[target] ?? null,
         blocked_by: recommendedInspectBlockedBy[target] ?? [],
@@ -760,6 +782,8 @@ async function readTeamPaneStatus(
     recommended_inspect_task_results: recommendedInspectTaskResults,
     recommended_inspect_task_errors: recommendedInspectTaskErrors,
     recommended_inspect_task_versions: recommendedInspectTaskVersions,
+    recommended_inspect_task_created_at: recommendedInspectTaskCreatedAt,
+    recommended_inspect_task_completed_at: recommendedInspectTaskCompletedAt,
     recommended_inspect_requires_code_change: recommendedInspectRequiresCodeChange,
     recommended_inspect_descriptions: recommendedInspectDescriptions,
     recommended_inspect_blocked_by: recommendedInspectBlockedBy,
@@ -890,6 +914,16 @@ function renderTeamPaneStatus(
       console.log(`inspect_task_version_${target}: ${taskVersion}`);
     }
   }
+  for (const [target, taskCreatedAt] of Object.entries(paneStatus.recommended_inspect_task_created_at)) {
+    if (taskCreatedAt) {
+      console.log(`inspect_task_created_at_${target}: ${taskCreatedAt}`);
+    }
+  }
+  for (const [target, taskCompletedAt] of Object.entries(paneStatus.recommended_inspect_task_completed_at)) {
+    if (taskCompletedAt) {
+      console.log(`inspect_task_completed_at_${target}: ${taskCompletedAt}`);
+    }
+  }
   for (const [target, requiresCodeChange] of Object.entries(paneStatus.recommended_inspect_requires_code_change)) {
     if (typeof requiresCodeChange === 'boolean') {
       console.log(`inspect_requires_code_change_${target}: ${requiresCodeChange}`);
@@ -978,6 +1012,8 @@ function renderTeamPaneStatus(
     const taskResultPart = item.task_result ? ` task_result=${item.task_result}` : '';
     const taskErrorPart = item.task_error ? ` task_error=${item.task_error}` : '';
     const taskVersionPart = typeof item.task_version === 'number' ? ` task_version=${item.task_version}` : '';
+    const taskCreatedAtPart = item.task_created_at ? ` task_created_at=${item.task_created_at}` : '';
+    const taskCompletedAtPart = item.task_completed_at ? ` task_completed_at=${item.task_completed_at}` : '';
     const requiresCodeChangePart = typeof item.requires_code_change === 'boolean'
       ? ` requires_code_change=${item.requires_code_change}`
       : '';
@@ -990,7 +1026,7 @@ function renderTeamPaneStatus(
     const statePart = item.state ? ` state=${item.state}` : '';
     const taskPart = item.task_id ? ` task=${item.task_id}` : '';
     const subjectPart = item.task_subject ? ` subject=${item.task_subject}` : '';
-    console.log(`inspect_item_${index + 1}: target=${item.target}${panePart}${cliPart}${rolePart}${indexPart}${alivePart}${turnCountPart}${turnsWithoutProgressPart}${lastTurnPart}${statusUpdatedPart}${pidPart}${worktreePathPart}${worktreeBranchPart}${worktreeDetachedPart}${workdirPart}${assignedTasksPart}${taskStatusPart}${taskResultPart}${taskErrorPart}${taskVersionPart}${requiresCodeChangePart}${taskDescriptionPart}${blockedByPart}${taskRolePart}${taskOwnerPart}${approvalStatusPart}${approvalReviewerPart} reason=${item.reason}${statePart}${taskPart}${subjectPart} command=${item.command}`);
+    console.log(`inspect_item_${index + 1}: target=${item.target}${panePart}${cliPart}${rolePart}${indexPart}${alivePart}${turnCountPart}${turnsWithoutProgressPart}${lastTurnPart}${statusUpdatedPart}${pidPart}${worktreePathPart}${worktreeBranchPart}${worktreeDetachedPart}${workdirPart}${assignedTasksPart}${taskStatusPart}${taskResultPart}${taskErrorPart}${taskVersionPart}${taskCreatedAtPart}${taskCompletedAtPart}${requiresCodeChangePart}${taskDescriptionPart}${blockedByPart}${taskRolePart}${taskOwnerPart}${approvalStatusPart}${approvalReviewerPart} reason=${item.reason}${statePart}${taskPart}${subjectPart} command=${item.command}`);
   }
 
   for (const [target, command] of Object.entries(paneStatus.sparkshell_commands)) {
