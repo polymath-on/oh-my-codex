@@ -34,8 +34,12 @@ function runOmx(
       cwd,
       encoding: 'utf-8',
       env: { ...process.env, ...envOverrides },
-    });
+  });
   return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '', error: r.error?.message };
+}
+
+function shouldSkipForSpawnPermissions(err?: string): boolean {
+  return typeof err === 'string' && /(EPERM|EACCES)/i.test(err);
 }
 
 describe('parseExploreArgs', () => {

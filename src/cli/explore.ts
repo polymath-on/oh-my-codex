@@ -170,6 +170,15 @@ export function resolvePackagedExploreHarnessCommand(
   }
 }
 
+export function repoBuiltExploreHarnessCommand(
+  packageRoot = getPackageRoot(),
+  platform: NodeJS.Platform = process.platform,
+): ExploreHarnessCommand | undefined {
+  const binaryPath = join(packageRoot, 'target', 'release', packagedExploreHarnessBinaryName(platform));
+  if (!existsSync(binaryPath)) return undefined;
+  return { command: binaryPath, args: [] };
+}
+
 function exploreUsageError(reason: string): Error {
   return new Error(`${reason}\n${EXPLORE_USAGE}`);
 }
