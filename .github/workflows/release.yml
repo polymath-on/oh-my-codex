@@ -98,7 +98,7 @@ jobs:
             --artifacts-dir release-assets \
             --out release-assets/native-release-manifest.json \
             --release-base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}" \
-            --require-products "omx-explore-harness,omx-sparkshell"
+            --require-products "omx-explore-harness,omx-runtime,omx-sparkshell"
       - name: Upload release asset bundle for follow-up jobs
         uses: actions/upload-artifact@v4
         with:

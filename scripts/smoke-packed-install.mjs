@@ -54,6 +54,10 @@ function npmBinName(name) {
   return process.platform === 'win32' ? `${name}.cmd` : name;
 }
 
+function globalPackageRoot(prefixDir) {
+  return run('npm', ['root', '-g', '--prefix', prefixDir]).stdout.trim();
+}
+
 function startStaticServer(root) {
   return new Promise((resolveServer, reject) => {
     const server = createServer((req, res) => {
@@ -180,6 +184,24 @@ async function main() {
       if (!explore.stdout.includes('# Answer') || !explore.stdout.includes('packed install smoke harness')) {
         throw new Error(`Unexpected explore stdout:\n${explore.stdout}`);
       }
+      const packageRoot = join(globalPackageRoot(prefixDir), 'oh-my-codex');
+      const hydrateRuntime = run(
+        process.execPath,
+        [
+          '--input-type=module',
+          '-e',
+          `import { hydrateNativeBinary } from ${JSON.stringify(join(packageRoot, 'dist', 'cli', 'native-assets.js'))};
+const hydrated = await hydrateNativeBinary('omx-runtime', { packageRoot: ${JSON.stringify(packageRoot)}, env: process.env });
+if (!hydrated) throw new Error('runtime hydration returned undefined');
+console.log(hydrated);`,
+        ],
+        { cwd: repoRoot, env },
+      );
+      if (!hydrateRuntime.stdout.includes('omx-runtime')) {
+        throw new Error(`Unexpected runtime hydration stdout:
+${hydrateRuntime.stdout}`);
+      }
+
     }
 
     console.log('packed install smoke: PASS');
