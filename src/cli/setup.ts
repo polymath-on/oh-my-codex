@@ -100,6 +100,8 @@ interface SetupBackupContext {
   baseRoot: string;
 }
 
+const PROJECT_OMX_GITIGNORE_ENTRY = ".omx/";
+
 function applyScopePathRewritesToAgentsTemplate(
   content: string,
   scope: SetupScope,
@@ -359,6 +361,47 @@ async function resolveSetupScope(
   return { scope: DEFAULT_SETUP_SCOPE, source: "default" };
 }
 
+function hasGitignoreEntry(content: string, entry: string): boolean {
+  return content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .some((line) => line === entry);
+}
+
+async function ensureProjectOmxGitignore(
+  projectRoot: string,
+  backupContext: SetupBackupContext,
+  options: Pick<SetupOptions, "dryRun" | "verbose">,
+): Promise<"created" | "updated" | "unchanged"> {
+  const gitignorePath = join(projectRoot, ".gitignore");
+  const destinationExists = existsSync(gitignorePath);
+  const existing = destinationExists ? await readFile(gitignorePath, "utf-8") : "";
+
+  if (hasGitignoreEntry(existing, PROJECT_OMX_GITIGNORE_ENTRY)) {
+    return "unchanged";
+  }
+
+  const nextContent = destinationExists
+    ? `${existing}${existing.endsWith("\n") || existing.length === 0 ? "" : "\n"}${PROJECT_OMX_GITIGNORE_ENTRY}\n`
+    : `${PROJECT_OMX_GITIGNORE_ENTRY}\n`;
+
+  if (await ensureBackup(gitignorePath, destinationExists, backupContext, options)) {
+    // backup created when refreshing a pre-existing .gitignore
+  }
+
+  if (!options.dryRun) {
+    await writeFile(gitignorePath, nextContent);
+  }
+
+  if (options.verbose) {
+    console.log(
+      `  ${options.dryRun ? "would update" : destinationExists ? "updated" : "created"} .gitignore (${PROJECT_OMX_GITIGNORE_ENTRY})`,
+    );
+  }
+
+  return destinationExists ? "updated" : "created";
+}
+
 async function persistSetupScope(
   projectRoot: string,
   scope: SetupScope,
@@ -389,6 +432,7 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   const scopeDirs = resolveScopeDirectories(resolvedScope.scope, projectRoot);
   const scopeSourceMessage =
     resolvedScope.source === "persisted" ? " (from .omx/setup-scope.json)" : "";
+  const backupContext = getBackupContext(resolvedScope.scope, projectRoot);
 
   console.log("oh-my-codex setup");
   console.log("=================\n");
@@ -419,9 +463,25 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   });
   console.log("  Done.\n");
 
+  if (resolvedScope.scope === "project") {
+    const gitignoreResult = await ensureProjectOmxGitignore(
+      projectRoot,
+      backupContext,
+      { dryRun, verbose },
+    );
+    if (gitignoreResult === "created") {
+      console.log(
+        "  Created .gitignore with .omx/ so local OMX runtime state stays out of source control.\n",
+      );
+    } else if (gitignoreResult === "updated") {
+      console.log(
+        "  Added .omx/ to .gitignore so local OMX runtime state stays out of source control.\n",
+      );
+    }
+  }
+
   const catalogCounts = getCatalogHeadlineCounts();
   const summary = createEmptyRunSummary();
-  const backupContext = getBackupContext(resolvedScope.scope, projectRoot);
 
   // Step 2: Install agent prompts
   console.log("[2/8] Installing agent prompts...");

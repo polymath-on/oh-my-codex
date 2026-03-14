@@ -83,6 +83,7 @@ CRITICAL: Never omit from_worker. The MCP server cannot auto-detect your identit
 When your mailbox receives a message, process delivery explicitly:
 1. Read: \`omx team api mailbox-list --input "{\"team_name\":\"${teamName}\",\"worker\":\"<your-worker-name>\"}" --json\`
 2. Mark delivered: \`omx team api mailbox-mark-delivered --input "{\"team_name\":\"${teamName}\",\"worker\":\"<your-worker-name>\",\"message_id\":\"<MESSAGE_ID>\"}" --json\`
+3. If you reply, include concrete progress and keep executing your assigned work or the next feasible task after replying.
 
 ## Rules
 - Do NOT edit files outside the paths listed in your task description
@@ -379,6 +380,7 @@ When you are notified about mailbox messages, always follow this exact flow:
    \`omx team api mailbox-mark-delivered --input "{\"team_name\":\"${teamName}\",\"worker\":\"${workerName}\",\"message_id\":\"<MESSAGE_ID>\"}" --json\`
 
 Use terse ACK bodies (single line) for consistent parsing across Codex and Claude workers.
+After any mailbox reply, continue executing your assigned work or the next feasible task; do not stop after sending the reply.
 
 ## Message Protocol
 When using \`omx team api send-message\`, ALWAYS include from_worker with YOUR worker name:
@@ -467,9 +469,9 @@ export function generateTriggerMessage(
 ): string {
   const inboxPath = buildInstructionPath(teamStateRoot, 'team', teamName, 'workers', workerName, 'inbox.md');
   if (teamStateRoot !== '.omx/state') {
-    return `Read ${inboxPath}, work now, report progress.`;
+    return `Read ${inboxPath}, work now, report progress, continue assigned work or next feasible task.`;
   }
-  return `Read ${inboxPath}, start work now, then report concrete progress (not ACK-only).`;
+  return `Read ${inboxPath}, start work now, report concrete progress, then continue assigned work or next feasible task.`;
 }
 
 /**
@@ -485,9 +487,9 @@ export function generateMailboxTriggerMessage(
   const n = Number.isFinite(count) ? Math.max(1, Math.floor(count)) : 1;
   const mailboxPath = buildInstructionPath(teamStateRoot, 'team', teamName, 'mailbox', workerName + '.json');
   if (teamStateRoot !== '.omx/state') {
-    return `${n} new msg(s): read ${mailboxPath}, act, report progress.`;
+    return `${n} new msg(s): read ${mailboxPath}, act, report progress, continue assigned work or next feasible task.`;
   }
-  return `You have ${n} new message(s). Read ${mailboxPath}, act now, and reply with concrete progress (not ACK-only).`;
+  return `You have ${n} new message(s). Read ${mailboxPath}, act now, reply with concrete progress, then continue assigned work or next feasible task.`;
 }
 
 export function generateLeaderMailboxTriggerMessage(

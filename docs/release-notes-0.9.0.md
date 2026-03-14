@@ -81,6 +81,7 @@ Representative changes:
 
 Alongside the spark-focused work, `dev` also picked up supporting improvements that make the release feel more complete:
 
+- worker mailbox/trigger wording now nudges workers to report progress and continue execution instead of stopping after a reply (`#805`)
 - centralized default model resolution (`94769c1`, PR `#787`)
 - local help routing cleanup for `ask` and `hud` (`6b0b560`, `6dc245e`, PR `#786`)
 - team runtime lifecycle and cleanup hardening (`a0a9626`, PR `#785`)
@@ -114,6 +115,7 @@ omx setup --force --scope project
 - [#789](https://github.com/Yeachan-Heo/oh-my-codex/pull/789) — distribute generated aspect tasks across workers
 - [#793](https://github.com/Yeachan-Heo/oh-my-codex/pull/793) — Windows Codex command shim probing fix
 - [#794](https://github.com/Yeachan-Heo/oh-my-codex/pull/794) — merge `experimental/dev` into `dev`
+- [#805](https://github.com/Yeachan-Heo/oh-my-codex/pull/805) — keep workers running after mailbox replies
 
 ## Related issues highlighted in this release
 

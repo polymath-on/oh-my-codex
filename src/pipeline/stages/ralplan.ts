@@ -5,10 +5,8 @@
  * into a PipelineStage. Produces a plan artifact at `.omx/plans/`.
  */
 
-import { existsSync, readdirSync } from 'fs';
-import { readdir } from 'fs/promises';
-import { join } from 'path';
 import type { PipelineStage, StageContext, StageResult } from '../types.js';
+import { isPlanningComplete, readPlanningArtifacts } from '../../planning/artifacts.js';
 
 /**
  * Create a RALPLAN pipeline stage.
@@ -26,33 +24,24 @@ export function createRalplanStage(): PipelineStage {
     name: 'ralplan',
 
     canSkip(ctx: StageContext): boolean {
-      // Skip if a plan artifact already exists
-      const plansDir = join(ctx.cwd, '.omx', 'plans');
-      if (!existsSync(plansDir)) return false;
-      try {
-        const files = readdirSync(plansDir) as string[];
-        return files.some(
-          (f: string) => f.startsWith('prd-') && f.endsWith('.md'),
-        );
-      } catch {
-        return false;
-      }
+      return isPlanningComplete(readPlanningArtifacts(ctx.cwd));
     },
 
     async run(ctx: StageContext): Promise<StageResult> {
       const startTime = Date.now();
-      const plansDir = join(ctx.cwd, '.omx', 'plans');
-
       try {
-        // Discover any existing plan files
-        const existingPlans = await discoverPlanFiles(plansDir);
+        const planningArtifacts = readPlanningArtifacts(ctx.cwd);
 
         return {
           status: 'completed',
           artifacts: {
-            plansDir,
+            plansDir: planningArtifacts.plansDir,
+            specsDir: planningArtifacts.specsDir,
             task: ctx.task,
-            existingPlans,
+            prdPaths: planningArtifacts.prdPaths,
+            testSpecPaths: planningArtifacts.testSpecPaths,
+            deepInterviewSpecPaths: planningArtifacts.deepInterviewSpecPaths,
+            planningComplete: isPlanningComplete(planningArtifacts),
             stage: 'ralplan',
             instruction: `Run RALPLAN consensus planning for: ${ctx.task}`,
           },
@@ -68,16 +57,4 @@ export function createRalplanStage(): PipelineStage {
       }
     },
   };
-}
-
-async function discoverPlanFiles(plansDir: string): Promise<string[]> {
-  if (!existsSync(plansDir)) return [];
-  try {
-    const files = await readdir(plansDir);
-    return files
-      .filter((f) => f.endsWith('.md'))
-      .map((f) => join(plansDir, f));
-  } catch {
-    return [];
-  }
 }

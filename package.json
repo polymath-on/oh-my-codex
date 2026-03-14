@@ -40,7 +40,7 @@
   "files": [
     "Cargo.toml",
     "Cargo.lock",
-    "bin/",
+    "bin/omx.js",
     "dist/",
     "crates/",
     "agents/",

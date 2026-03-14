@@ -48,6 +48,8 @@ const DEFAULT_SETUP_MODEL_AUTO_COMPACT_TOKEN_LIMIT = 900000;
 const SHARED_MCP_REGISTRY_MARKER = "oh-my-codex (OMX) Shared MCP Registry Sync";
 const SHARED_MCP_REGISTRY_END_MARKER =
   "# End oh-my-codex shared MCP registry sync";
+const OMX_TUI_STATUS_LINE =
+  'status_line = ["model-with-reasoning", "git-branch", "context-remaining", "total-input-tokens", "total-output-tokens", "five-hour-limit"]';
 
 function unwrapTomlString(value: string | undefined): string | undefined {
   return value?.match(/^"(.*)"$/)?.[1];
@@ -139,6 +141,12 @@ function stripRootLevelKeys(config: string, keys: readonly string[]): string {
   }
 
   return result.join("\n");
+}
+
+function stripOrphanedManagedNotify(config: string): string {
+  return config
+    .replace(/^\s*notify\s*=\s*\["node",\s*".*notify-hook\.js"\]\s*$(\n)?/gm, "")
+    .replace(/\n?\s*"node",\s*\n\s*".*notify-hook\.js",\s*\n\s*\]\s*(?=\n|$)/g, "");
 }
 
 /**
@@ -338,6 +346,77 @@ function stripOrphanedOmxSections(config: string): string {
   return result.join("\n");
 }
 
+function upsertTuiStatusLine(config: string): {
+  cleaned: string;
+  hadExistingTui: boolean;
+} {
+  const lines = config.split(/\r?\n/);
+  const sections: Array<{ start: number; end: number }> = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^\s*\[tui\]\s*$/.test(lines[i])) continue;
+
+    let end = lines.length;
+    for (let j = i + 1; j < lines.length; j++) {
+      if (/^\s*\[\[?[^\]]+\]?\]\s*$/.test(lines[j])) {
+        end = j;
+        break;
+      }
+    }
+    sections.push({ start: i, end });
+    i = end - 1;
+  }
+
+  if (sections.length === 0) {
+    return { cleaned: config, hadExistingTui: false };
+  }
+
+  const preservedKeyLines: string[] = [];
+  const seenKeys = new Set<string>();
+
+  for (const section of sections) {
+    for (let i = section.start + 1; i < section.end; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+
+      const keyMatch = trimmed.match(/^([A-Za-z0-9_-]+)\s*=/);
+      if (!keyMatch) continue;
+
+      const key = keyMatch[1];
+      if (key === "status_line" || seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      preservedKeyLines.push(trimmed);
+    }
+  }
+
+  const mergedSection = ["[tui]", ...preservedKeyLines, OMX_TUI_STATUS_LINE];
+  const firstStart = sections[0].start;
+  const rebuilt: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const section = sections.find((candidate) => candidate.start === i);
+    if (section) {
+      if (i === firstStart) {
+        if (rebuilt.length > 0 && rebuilt[rebuilt.length - 1].trim() !== "") {
+          rebuilt.push("");
+        }
+        rebuilt.push(...mergedSection, "");
+      }
+
+      i = section.end - 1;
+      continue;
+    }
+
+    rebuilt.push(lines[i]);
+  }
+
+  return {
+    cleaned: rebuilt.join("\n").replace(/\n{3,}/g, "\n\n"),
+    hadExistingTui: true,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // OMX [table] sections block (appended at end of file)
 // ---------------------------------------------------------------------------
@@ -524,7 +603,11 @@ function getAgentEntries(agentsConfigDir: string): string[] {
  * OMX table-section block (MCP servers, TUI).
  * Contains ONLY [table] sections — no bare keys.
  */
-function getOmxTablesBlock(pkgRoot: string, agentsConfigDir: string): string {
+function getOmxTablesBlock(
+  pkgRoot: string,
+  agentsConfigDir: string,
+  includeTui = true,
+): string {
   const stateServerPath = escapeTomlString(
     join(pkgRoot, "dist", "mcp", "state-server.js"),
   );
@@ -583,11 +666,15 @@ function getOmxTablesBlock(pkgRoot: string, agentsConfigDir: string): string {
     "enabled = true",
     "startup_timeout_sec = 5",
     ...getAgentEntries(agentsConfigDir),
-    "",
-    "# OMX TUI StatusLine (Codex CLI v0.101.0+)",
-    "[tui]",
-    'status_line = ["model-with-reasoning", "git-branch", "context-remaining", "total-input-tokens", "total-output-tokens", "five-hour-limit"]',
-    "",
+    ...(includeTui
+      ? [
+        "",
+        "# OMX TUI StatusLine (Codex CLI v0.101.0+)",
+        "[tui]",
+        OMX_TUI_STATUS_LINE,
+        "",
+      ]
+      : []),
     "# ============================================================",
     "# End oh-my-codex",
     "",
@@ -625,11 +712,14 @@ export function buildMergedConfig(
   }
 
   existing = stripOmxTopLevelKeys(existing);
+  existing = stripOrphanedManagedNotify(existing);
   if (options.modelOverride) {
     existing = stripRootLevelKeys(existing, ["model"]);
   }
   existing = stripOrphanedOmxSections(existing);
   existing = upsertFeatureFlags(existing);
+  const tuiUpsert = upsertTuiStatusLine(existing);
+  existing = tuiUpsert.cleaned;
 
   const topLines = getOmxTopLevelLines(
     pkgRoot,
@@ -639,6 +729,7 @@ export function buildMergedConfig(
   const tablesBlock = getOmxTablesBlock(
     pkgRoot,
     options.agentsConfigDir || omxAgentsConfigDir(),
+    !tuiUpsert.hadExistingTui,
   );
   const sharedRegistryBlock = getSharedMcpRegistryBlock(
     options.sharedMcpServers ?? [],

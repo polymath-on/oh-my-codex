@@ -592,6 +592,38 @@ describe('exploreCommand', () => {
     }
   });
 
+  it('falls back to the explore harness when sparkshell is GLIBC-incompatible', async () => {
+    const wd = await mkdtemp(join(tmpdir(), 'omx-explore-sparkshell-glibc-'));
+    try {
+      const sparkshellStub = join(wd, 'sparkshell-stub.sh');
+      const harnessStub = join(wd, 'explore-stub.sh');
+      await writeFile(
+        sparkshellStub,
+        "#!/bin/sh\necho \"omx-sparkshell: /lib/x86_64-linux-gnu/libc.so.6: version \\`GLIBC_2.39' not found\" 1>&2\nexit 1\n",
+      );
+      await writeFile(
+        harnessStub,
+        '#!/bin/sh\nprintf "%s\\n" "# Answer" "- fallback harness recovered the lookup"\n',
+      );
+      await chmod(sparkshellStub, 0o755);
+      await chmod(harnessStub, 0o755);
+
+      const result = runOmx(wd, ['explore', '--prompt', 'git log --oneline'], {
+        OMX_SPARKSHELL_BIN: sparkshellStub,
+        OMX_EXPLORE_BIN: harnessStub,
+      });
+      if (shouldSkipForSpawnPermissions(result.error)) return;
+
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.match(result.stderr, /GLIBC symbols/i);
+      assert.match(result.stderr, /Falling back to the explore harness/);
+      assert.match(result.stdout, /fallback harness recovered the lookup/);
+      assert.doesNotMatch(result.stderr, /version `GLIBC_2\.39' not found/);
+    } finally {
+      await rm(wd, { recursive: true, force: true });
+    }
+  });
+
   it('passes prompt to harness and preserves markdown stdout', async () => {
     const wd = await mkdtemp(join(tmpdir(), 'omx-explore-cmd-'));
     try {

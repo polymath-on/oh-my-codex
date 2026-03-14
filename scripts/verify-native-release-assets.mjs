@@ -26,6 +26,12 @@ function sha256(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
 }
 
+function archiveContainsBinary(members, binaryPath) {
+  return members.includes(binaryPath)
+    || members.some((member) => member.endsWith(`/${binaryPath}`))
+    || members.some((member) => member.replace(/\\/g, '/').endsWith(`/${binaryPath.replace(/\\/g, '/')}`));
+}
+
 const manifestPath = arg('--manifest');
 const artifactsDir = arg('--artifacts-dir');
 if (!manifestPath || !artifactsDir) usage();
@@ -46,7 +52,7 @@ for (const asset of manifest.assets) {
     : spawnSync('tar', ['-tf', archivePath], { encoding: 'utf-8' });
   if (list.status !== 0) throw new Error(`unable to inspect archive ${asset.archive}: ${list.stderr || list.stdout}`);
   const members = String(list.stdout || '').split(/\r?\n/).filter(Boolean);
-  if (!members.includes(asset.binary_path)) {
+  if (!archiveContainsBinary(members, asset.binary_path)) {
     throw new Error(`archive ${asset.archive} is missing ${asset.binary_path}`);
   }
 }

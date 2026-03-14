@@ -61,7 +61,6 @@ import {
   enableMouseScrolling,
   isNativeWindows,
   isTmuxAvailable,
-  isWsl2,
 } from '../team/tmux-session.js';
 import { getPackageRoot } from '../utils/package.js';
 import { codexConfigPath } from '../utils/paths.js';
@@ -275,10 +274,19 @@ export function commandOwnsLocalHelp(command: CliCommand): boolean {
   return NESTED_HELP_COMMANDS.has(command);
 }
 
-export type CodexLaunchPolicy = 'inside-tmux' | 'direct';
+export type CodexLaunchPolicy = 'inside-tmux' | 'detached-tmux' | 'direct';
 
-export function resolveCodexLaunchPolicy(env: NodeJS.ProcessEnv = process.env): CodexLaunchPolicy {
-  return env.TMUX ? 'inside-tmux' : 'direct';
+export function resolveCodexLaunchPolicy(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+  tmuxAvailable: boolean = isTmuxAvailable(),
+): CodexLaunchPolicy {
+  if (env.TMUX) return 'inside-tmux';
+  // On macOS, preserve the native terminal paste path for clipboard images.
+  // Detached tmux sessions strip the rich paste payload that Codex consumes,
+  // so image pastes appear to do nothing.
+  if (platform === 'darwin') return 'direct';
+  return tmuxAvailable ? 'detached-tmux' : 'direct';
 }
 
 type ExecFileSyncFailure = NodeJS.ErrnoException & {
@@ -1027,7 +1035,6 @@ export function buildDetachedSessionFinalizeSteps(
   hudPaneId: string | null,
   hookWindowIndex: string | null,
   enableMouse: boolean,
-  wsl2: boolean,
   nativeWindows = false,
 ): DetachedSessionTmuxStep[] {
   const steps: DetachedSessionTmuxStep[] = [];
@@ -1055,9 +1062,6 @@ export function buildDetachedSessionFinalizeSteps(
 
   if (enableMouse) {
     steps.push({ name: 'set-mouse', args: ['set-option', '-t', sessionName, 'mouse', 'on'] });
-    if (wsl2) {
-      steps.push({ name: 'set-wsl-xt', args: ['set-option', '-ga', 'terminal-overrides', ',xterm*:XT'] });
-    }
   }
   steps.push({ name: 'attach-session', args: ['attach-session', '-t', sessionName] });
   return steps;
@@ -1287,7 +1291,7 @@ function runCodex(
         killTmuxPane(paneId);
       }
     }
-  } else if (!isTmuxAvailable()) {
+  } else if (launchPolicy === 'direct') {
     // Detached HUD sessions require tmux. Skip the bootstrap entirely when the
     // binary is unavailable so direct launches do not emit noisy ENOENT logs.
     runCodexBlocking(cwd, launchArgs, codexEnvWithNotify);
@@ -1337,7 +1341,6 @@ function runCodex(
             hudPaneId,
             hookWindowIndex,
             process.env.OMX_MOUSE !== '0',
-            isWsl2(),
             nativeWindows,
           );
           if (nativeWindows && detachedWindowsCodexCmd) {

@@ -71,13 +71,36 @@ describe('RALPLAN Stage', () => {
     assert.equal(stage.canSkip!(makeCtx()), false);
   });
 
-  it('canSkip returns true when a prd- plan file exists', async () => {
+  it('canSkip returns false when only a prd- plan file exists', async () => {
     const plansDir = join(tempDir, '.omx', 'plans');
     await mkdir(plansDir, { recursive: true });
     await writeFile(join(plansDir, 'prd-my-feature.md'), '# Plan\n');
 
     const stage = createRalplanStage();
+    assert.equal(stage.canSkip!(makeCtx()), false);
+  });
+
+  it('canSkip returns true when both prd and test spec plan files exist', async () => {
+    const plansDir = join(tempDir, '.omx', 'plans');
+    await mkdir(plansDir, { recursive: true });
+    await writeFile(join(plansDir, 'prd-my-feature.md'), '# Plan\n');
+    await writeFile(join(plansDir, 'test-spec-my-feature.md'), '# Test Spec\n');
+
+    const stage = createRalplanStage();
     assert.equal(stage.canSkip!(makeCtx()), true);
+  });
+
+  it('surfaces deep-interview specs in ralplan artifacts for downstream traceability', async () => {
+    const specsDir = join(tempDir, '.omx', 'specs');
+    await mkdir(specsDir, { recursive: true });
+    await writeFile(join(specsDir, 'deep-interview-my-feature.md'), '# Deep Interview Spec\n');
+
+    const stage = createRalplanStage();
+    const result = await stage.run(makeCtx());
+    const artifacts = result.artifacts as Record<string, unknown>;
+
+    assert.deepEqual(artifacts.deepInterviewSpecPaths, [join(specsDir, 'deep-interview-my-feature.md')]);
+    assert.equal(artifacts.planningComplete, false);
   });
 
   it('canSkip returns false for non-prd plan files', async () => {

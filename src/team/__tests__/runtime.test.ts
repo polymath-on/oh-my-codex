@@ -674,7 +674,7 @@ sleep 5
         '--approval-mode',
         'yolo',
         '-i',
-        'Read .omx/state/team/team-gemini-prompt/workers/worker-1/inbox.md, start work now, then report concrete progress (not ACK-only).',
+        'Read .omx/state/team/team-gemini-prompt/workers/worker-1/inbox.md, start work now, report concrete progress, then continue assigned work or next feasible task.',
       ]);
 
       await shutdownTeam(runtime.teamName, cwd, { force: true });
@@ -1067,8 +1067,10 @@ exit 0
           assert.ok(runtime.config.resize_hook_name);
 
           const tmuxLog = await readFile(tmuxLogPath, 'utf-8');
-          const hudSplitRe = new RegExp(`split-window -v -l ${HUD_TMUX_TEAM_HEIGHT_LINES} -t %1 -d -P -F #\\{pane_id\\}`, 'g');
-          assert.equal(tmuxLog.match(hudSplitRe)?.length ?? 0, 3);
+          const teamHudSplitRe = new RegExp(`split-window -v -f -l ${HUD_TMUX_TEAM_HEIGHT_LINES} -t leader:0 -d -P -F #\\{pane_id\\}`, 'g');
+          const standaloneHudSplitRe = new RegExp(`split-window -v -l ${HUD_TMUX_TEAM_HEIGHT_LINES} -t %1 -d -P -F #\\{pane_id\\}`, 'g');
+          assert.equal(tmuxLog.match(teamHudSplitRe)?.length ?? 0, 2);
+          assert.equal(tmuxLog.match(standaloneHudSplitRe)?.length ?? 0, 1);
           assert.equal(tmuxLog.match(/set-hook -t leader:0 client-resized\[\d+\]/g)?.length ?? 0, 2);
           assert.equal(tmuxLog.match(/set-hook -t leader:0 client-attached\[\d+\]/g)?.length ?? 0, 2);
           assert.equal(tmuxLog.match(/run-shell -b sleep \d+; tmux resize-pane -t %3 -y \d+ >/g)?.length ?? 0, 3);
@@ -2161,7 +2163,7 @@ esac
           assert.match(tmuxLog, new RegExp(`split-window -v -l ${HUD_TMUX_TEAM_HEIGHT_LINES} -t %11 -d -P -F #\{pane_id\}`));
           assert.match(tmuxLog, /run-shell -b sleep \d+; tmux resize-pane -t %44 -y \d+ >/);
           assert.match(tmuxLog, /run-shell tmux resize-pane -t %44 -y \d+ >/);
-          assert.match(tmuxLog, /'\/tmp\/native\/omx-runtime' hud-watch/);
+          assert.match(tmuxLog, /'\/tmp\/rust\/omx-runtime' hud-watch/);
           assert.doesNotMatch(tmuxLog, /node .*hud --watch/);
           assert.match(tmuxLog, /select-pane -t %11/);
         },
@@ -2233,7 +2235,7 @@ esac
           process.env.TMUX_PANE = '%1';
           createTeamSession('team-native-hud-start', 1, cwd);
           const tmuxLog = await readFile(tmuxLogPath, 'utf-8');
-          assert.match(tmuxLog, /'\/tmp\/native\/omx-runtime' hud-watch/);
+          assert.match(tmuxLog, /'\/tmp\/rust\/omx-runtime' hud-watch/);
           assert.doesNotMatch(tmuxLog, /node .*hud --watch/);
         },
       );

@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
+  isSparkShellNativeCompatibilityFailure,
   nestedRepoLocalSparkShellBinaryPath,
   parseSparkShellFallbackInvocation,
   repoLocalSparkShellBinaryPath,
@@ -250,7 +251,7 @@ describe('runSparkShellBinary', () => {
     assert.deepEqual(invoked, {
       binaryPath: '/fake/omx-sparkshell',
       args: ['git', 'diff --stat', 'a|b'],
-      stdio: 'inherit',
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
   });
 
@@ -289,6 +290,36 @@ describe('runSparkShellBinary', () => {
     } finally {
       await rm(codexHome, { recursive: true, force: true });
     }
+  });
+});
+
+describe('isSparkShellNativeCompatibilityFailure', () => {
+  it('detects GLIBC symbol version failures from the native loader', () => {
+    assert.equal(
+      isSparkShellNativeCompatibilityFailure({
+        pid: 1,
+        output: [],
+        stdout: '',
+        stderr: "omx-sparkshell: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.39' not found\n",
+        status: 1,
+        signal: null,
+      }),
+      true,
+    );
+  });
+
+  it('ignores non-compatibility stderr failures', () => {
+    assert.equal(
+      isSparkShellNativeCompatibilityFailure({
+        pid: 1,
+        output: [],
+        stdout: '',
+        stderr: 'omx sparkshell: summary unavailable (tmux failed)\n',
+        status: 1,
+        signal: null,
+      }),
+      false,
+    );
   });
 });
 
@@ -366,6 +397,38 @@ describe('omx sparkshell', () => {
       assert.equal(result.status, 7, result.stderr || result.stdout);
       assert.equal(result.stdout, 'spark-stdout\n');
       assert.equal(result.stderr, 'spark-stderr\n');
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to raw execution when the packaged native binary is GLIBC-incompatible', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'omx-sparkshell-glibc-fallback-'));
+    try {
+      const testDir = dirname(fileURLToPath(import.meta.url));
+      const repoRoot = join(testDir, '..', '..', '..');
+      const packageJson = JSON.parse(await readFile(join(repoRoot, 'package.json'), 'utf-8')) as { version: string };
+      const cacheDir = join(cwd, 'cache');
+      const binDir = join(cacheDir, packageJson.version, `${process.platform}-${process.arch}`, 'omx-sparkshell');
+      await mkdir(binDir, { recursive: true });
+      const stubPath = join(binDir, process.platform === 'win32' ? 'omx-sparkshell.exe' : 'omx-sparkshell');
+      await writeFile(
+        stubPath,
+        process.platform === 'win32'
+          ? '@echo off\r\n>&2 echo omx-sparkshell: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.39\' not found\r\nexit /b 1\r\n'
+          : "#!/bin/sh\necho \"omx-sparkshell: /lib/x86_64-linux-gnu/libc.so.6: version \\`GLIBC_2.39' not found\" 1>&2\nexit 1\n",
+      );
+      if (process.platform !== 'win32') await chmod(stubPath, 0o755);
+
+      const result = runOmx(cwd, ['sparkshell', 'node', '-e', 'process.stdout.write("raw-fallback\\n")'], {
+        OMX_NATIVE_CACHE_DIR: cacheDir,
+      });
+      if (shouldSkipForSpawnPermissions(result.error)) return;
+
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.equal(result.stdout, 'raw-fallback\n');
+      assert.match(result.stderr, /GLIBC-incompatible/i);
+      assert.doesNotMatch(result.stderr, /version `GLIBC_2\.39' not found/);
     } finally {
       await rm(cwd, { recursive: true, force: true });
     }

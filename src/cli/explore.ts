@@ -3,7 +3,11 @@ import { isAbsolute, join } from 'path';
 import { existsSync, readFileSync } from 'fs';
 import { getPackageRoot } from '../utils/package.js';
 import { spawnPlatformCommandSync } from '../utils/platform-command.js';
-import { resolveSparkShellBinaryPathWithHydration, runSparkShellBinary } from './sparkshell.js';
+import {
+  isSparkShellNativeCompatibilityFailure,
+  resolveSparkShellBinaryPathWithHydration,
+  runSparkShellBinary,
+} from './sparkshell.js';
 import { getMainDefaultModel, getSparkDefaultModel } from '../config/models.js';
 import {
   EXPLORE_BIN_ENV as EXPLORE_BIN_ENV_SHARED,
@@ -138,6 +142,13 @@ async function runExploreViaSparkShell(route: ExploreSparkShellRoute, env: NodeJ
     const errno = result.error as NodeJS.ErrnoException;
     throw new Error(`[explore] failed to launch sparkshell backend: ${errno.message}`);
   }
+
+  if (isSparkShellNativeCompatibilityFailure(result)) {
+    throw new Error('[explore] sparkshell backend is incompatible with this Linux runtime (missing GLIBC symbols)');
+  }
+
+  if (result.stdout && result.stdout.length > 0) process.stdout.write(result.stdout);
+  if (result.stderr && result.stderr.length > 0) process.stderr.write(result.stderr);
 
   if (result.status !== 0) {
     process.exitCode = result.status ?? 1;

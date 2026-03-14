@@ -32,6 +32,12 @@ omx sparkshell --tmux-pane %12 --tail-lines 400
 - fallback behavior remains explicit and hardened
 - guidance/docs/tests were aligned around this contract
 
+### Worker follow-through polish
+
+- worker mailbox guidance now asks for concrete progress updates without implying work should stop after replying
+- inbox/mailbox trigger wording now tells workers to continue assigned or next feasible work after reporting status
+- runtime/bootstrap wording and associated tests were aligned around this behavior
+
 ### Release pipeline upgrades
 
 - cross-platform native publishing for:
@@ -86,6 +92,7 @@ Validated locally on `dev` before tagging:
 - [#789](https://github.com/Yeachan-Heo/oh-my-codex/pull/789) — distribute generated aspect tasks across workers
 - [#793](https://github.com/Yeachan-Heo/oh-my-codex/pull/793) — Windows Codex command shim probing fix
 - [#794](https://github.com/Yeachan-Heo/oh-my-codex/pull/794) — merge `experimental/dev` into `dev`
+- [#805](https://github.com/Yeachan-Heo/oh-my-codex/pull/805) — keep workers running after mailbox replies
 
 ## Related issues
 

@@ -121,6 +121,7 @@ describe('native asset helpers', () => {
     }
   });
 
+
   it('hydrates the omx-runtime binary from the release manifest into the cache', async () => {
     const wd = await mkdtemp(join(tmpdir(), 'omx-native-runtime-hydrate-'));
     const cacheDir = join(wd, 'cache');
@@ -181,6 +182,74 @@ describe('native asset helpers', () => {
           OMX_NATIVE_CACHE_DIR: cacheDir,
         }));
         assert.equal(await readFile(hydrated!, 'utf-8'), '#!/bin/sh\necho runtime\n');
+      } finally {
+        await server.close();
+      }
+    } finally {
+      await rm(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('hydrates a native binary when the archive wraps files in a top-level directory', async () => {
+    const wd = await mkdtemp(join(tmpdir(), 'omx-native-hydrate-nested-'));
+    const cacheDir = join(wd, 'cache');
+    const assetRoot = join(wd, 'assets');
+    try {
+      await mkdir(assetRoot, { recursive: true });
+      await writeFile(join(wd, 'package.json'), JSON.stringify({
+        version: '0.8.15',
+        repository: { url: 'git+https://github.com/Yeachan-Heo/oh-my-codex.git' },
+      }));
+
+      const stagingDir = join(wd, 'staging', 'omx-sparkshell-x86_64-unknown-linux-gnu');
+      await mkdir(stagingDir, { recursive: true });
+      const binaryPath = join(stagingDir, 'omx-sparkshell');
+      await writeFile(binaryPath, '#!/bin/sh\necho hydrated-nested\n');
+      await chmod(binaryPath, 0o755);
+
+      const archivePath = join(assetRoot, 'omx-sparkshell-x86_64-unknown-linux-gnu.tar.gz');
+      const archive = spawnSync('tar', ['-czf', archivePath, '-C', join(wd, 'staging'), 'omx-sparkshell-x86_64-unknown-linux-gnu'], { encoding: 'utf-8' });
+      assert.equal(archive.status, 0, archive.stderr || archive.stdout);
+      const archiveBuffer = await readFile(archivePath);
+
+      const manifest = {
+        version: '0.8.15',
+        tag: 'v0.8.15',
+        assets: [
+          {
+            product: 'omx-sparkshell',
+            version: '0.8.15',
+            platform: 'linux',
+            arch: 'x64',
+            archive: 'omx-sparkshell-x86_64-unknown-linux-gnu.tar.gz',
+            binary: 'omx-sparkshell',
+            binary_path: 'omx-sparkshell',
+            sha256: sha256(archiveBuffer),
+            size: archiveBuffer.length,
+            download_url: '',
+          },
+        ],
+      };
+
+      const server = await startStaticServer(assetRoot);
+      try {
+        manifest.assets[0].download_url = `${server.baseUrl}/${manifest.assets[0].archive}`;
+        await writeFile(join(assetRoot, 'native-release-manifest.json'), JSON.stringify(manifest, null, 2));
+
+        const hydrated = await hydrateNativeBinary('omx-sparkshell', {
+          packageRoot: wd,
+          env: {
+            OMX_NATIVE_MANIFEST_URL: `${server.baseUrl}/native-release-manifest.json`,
+            OMX_NATIVE_CACHE_DIR: cacheDir,
+          },
+          platform: 'linux',
+          arch: 'x64',
+        });
+
+        assert.equal(hydrated, resolveCachedNativeBinaryPath('omx-sparkshell', '0.8.15', 'linux', 'x64', {
+          OMX_NATIVE_CACHE_DIR: cacheDir,
+        }));
+        assert.equal(await readFile(hydrated!, 'utf-8'), '#!/bin/sh\necho hydrated-nested\n');
       } finally {
         await server.close();
       }

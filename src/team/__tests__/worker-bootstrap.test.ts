@@ -220,6 +220,7 @@ describe('worker bootstrap', () => {
     assert.match(inbox, /ACK: worker-1 initialized/);
     assert.match(inbox, /Mailbox Delivery Protocol \(Required\)/);
     assert.match(inbox, /mailbox-mark-delivered/);
+    assert.match(inbox, /continue executing your assigned work or the next feasible task/i);
     assert.doesNotMatch(inbox, /Write `\{"status": "completed", "result": "brief summary"\}` to the task file/);
     assert.match(inbox, /Verification Requirements/);
     assert.match(inbox, /Fix-Verify Loop/);
@@ -322,7 +323,8 @@ describe('worker bootstrap', () => {
     assert.match(message, /\.omx\/state\/team\/team-path\/workers\/worker-9\/inbox\.md/);
     assert.match(message, /start work now/i);
     assert.match(message, /concrete progress/i);
-    assert.match(message, /ACK-only/);
+    assert.match(message, /continue assigned work/i);
+    assert.match(message, /next feasible task/i);
   });
 
   it('generateTriggerMessage uses provided state-root reference for worktree workers', () => {
@@ -330,6 +332,8 @@ describe('worker bootstrap', () => {
     assert.match(message, /\$OMX_TEAM_STATE_ROOT\/team\/team-path\/workers\/worker-9\/inbox\.md/);
     assert.match(message, /work now/i);
     assert.match(message, /report progress/i);
+    assert.match(message, /continue assigned work/i);
+    assert.match(message, /next feasible task/i);
     assert.ok(message.length < 200);
   });
 
@@ -344,7 +348,8 @@ describe('worker bootstrap', () => {
     assert.match(message, /Read .*\.omx\/state\/team\/team-mail\/mailbox\/worker-2\.json/);
     assert.match(message, /act now/i);
     assert.match(message, /concrete progress/i);
-    assert.match(message, /ACK-only/);
+    assert.match(message, /continue assigned work/i);
+    assert.match(message, /next feasible task/i);
   });
 
   it('generateMailboxTriggerMessage uses provided state-root reference for worktree workers', () => {
@@ -353,6 +358,8 @@ describe('worker bootstrap', () => {
     assert.match(message, /read .*\$OMX_TEAM_STATE_ROOT\/team\/team-mail\/mailbox\/worker-2\.json/i);
     assert.match(message, /act/i);
     assert.match(message, /report progress/i);
+    assert.match(message, /continue assigned work/i);
+    assert.match(message, /next feasible task/i);
     assert.ok(message.length < 200);
   });
 

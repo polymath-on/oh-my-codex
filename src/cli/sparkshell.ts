@@ -160,16 +160,32 @@ export function runSparkShellBinary(
   const spawnOptions: SpawnSyncOptionsWithStringEncoding = {
     cwd,
     env: { ...configEnvOverrides, ...env },
-    stdio: 'inherit',
+    stdio: ['ignore', 'pipe', 'pipe'],
     encoding: 'utf-8',
   };
 
   return spawnImpl(binaryPath, [...args], spawnOptions);
 }
 
+function writeSparkShellResultOutput(result: SpawnSyncReturns<string>): void {
+  if (typeof result.stdout === 'string' && result.stdout.length > 0) process.stdout.write(result.stdout);
+  if (typeof result.stderr === 'string' && result.stderr.length > 0) process.stderr.write(result.stderr);
+}
+
+const SPARKSHELL_GLIBC_INCOMPATIBLE_PATTERN = /GLIBC(?:XX)?_[0-9.]+['` ]+not found/i;
+
+export function isSparkShellNativeCompatibilityFailure(result: SpawnSyncReturns<string>): boolean {
+  if ((result.status ?? 0) === 0) return false;
+  return SPARKSHELL_GLIBC_INCOMPATIBLE_PATTERN.test(result.stderr || '');
+}
+
 interface SparkShellFallbackInvocation {
   argv: string[];
   kind: 'command' | 'tmux-pane';
+}
+
+interface RunSparkShellFallbackOptions {
+  announce?: boolean;
 }
 
 export function parseSparkShellFallbackInvocation(args: readonly string[]): SparkShellFallbackInvocation {
@@ -241,9 +257,12 @@ export function parseSparkShellFallbackInvocation(args: readonly string[]): Spar
   };
 }
 
-function runSparkShellFallback(args: readonly string[]): void {
+function runSparkShellFallback(args: readonly string[], options: RunSparkShellFallbackOptions = {}): void {
+  const { announce = true } = options;
   const invocation = parseSparkShellFallbackInvocation(args);
-  process.stderr.write('[sparkshell] native sidecar unavailable; falling back to raw command execution without summary support.\n');
+  if (announce) {
+    process.stderr.write('[sparkshell] native sidecar unavailable; falling back to raw command execution without summary support.\n');
+  }
   const result = spawnSync(invocation.argv[0], invocation.argv.slice(1), {
     cwd: process.cwd(),
     env: process.env,
@@ -307,6 +326,14 @@ export async function sparkshellCommand(args: string[]): Promise<void> {
     }
     throw new Error(`[sparkshell] failed to launch native binary: ${errno.message}`);
   }
+
+  if (!hasExplicitOverride && isSparkShellNativeCompatibilityFailure(result)) {
+    process.stderr.write('[sparkshell] GLIBC-incompatible native sidecar detected; falling back to raw command execution without summary support.\n');
+    runSparkShellFallback(args, { announce: false });
+    return;
+  }
+
+  writeSparkShellResultOutput(result);
 
   if (result.status !== 0) {
     process.exitCode = typeof result.status === 'number'

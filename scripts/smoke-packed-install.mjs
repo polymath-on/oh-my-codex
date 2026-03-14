@@ -1,9 +1,10 @@
 import { createServer } from 'node:http';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { chmodSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 
 function usage() {
   return [
@@ -138,6 +139,23 @@ function writeCodexStub(binDir) {
   return stubPath;
 }
 
+export function prepareLocalHydrationAssetDirectory(sourceDir, tempRoot) {
+  const localDir = join(tempRoot, 'hydration-assets');
+  cpSync(sourceDir, localDir, { recursive: true });
+  return localDir;
+}
+
+export function rewriteManifestDownloadUrls(manifestPath, baseUrl) {
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+  manifest.assets = Array.isArray(manifest.assets)
+    ? manifest.assets.map((asset) => ({
+      ...asset,
+      download_url: new URL(asset.archive, `${baseUrl}/`).toString(),
+    }))
+    : [];
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
 async function main() {
   const { releaseAssetsDir } = parseArgs(process.argv.slice(2));
   const repoRoot = process.cwd();
@@ -165,7 +183,9 @@ async function main() {
     run(omxPath, ['--help'], { cwd: repoRoot });
 
     if (releaseAssetsDir) {
-      server = await startStaticServer(releaseAssetsDir);
+      const hydrationAssetsDir = prepareLocalHydrationAssetDirectory(releaseAssetsDir, tempRoot);
+      server = await startStaticServer(hydrationAssetsDir);
+      rewriteManifestDownloadUrls(join(hydrationAssetsDir, 'native-release-manifest.json'), server.baseUrl);
       const codexStub = writeCodexStub(helperBinDir);
       const env = {
         ...process.env,
@@ -212,7 +232,9 @@ ${hydrateRuntime.stdout}`);
   }
 }
 
-main().catch((error) => {
-  console.error(`packed install smoke: FAIL\n${error instanceof Error ? error.message : String(error)}`);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(`packed install smoke: FAIL\n${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  });
+}

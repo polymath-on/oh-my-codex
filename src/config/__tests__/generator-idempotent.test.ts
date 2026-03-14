@@ -333,26 +333,57 @@ describe("config generator idempotency (#384)", () => {
     }
   });
 
-  it("preserves user [tui] section (not claimed by orphan-strip)", async () => {
+  it("merges OMX status_line into an existing user [tui] section without duplicating the table", async () => {
     const wd = await mkdtemp(join(tmpdir(), "omx-idem-"));
     try {
       const configPath = join(wd, "config.toml");
-      // User has their own [tui] settings before OMX was installed
-      const userTui = ["[tui]", 'status_line = ["git-branch"]', ""].join("\n");
+      const userTui = [
+        "[tui]",
+        "theme = \"night\"",
+        'status_line = ["git-branch"]',
+        "",
+      ].join("\n");
       await writeFile(configPath, userTui);
 
       await mergeConfig(configPath, wd);
       const toml = await readFile(configPath, "utf-8");
 
-      // User's [tui] is preserved (not stripped by orphan-strip).
-      // The OMX block also writes [tui], so there will be 2 — this is a
-      // known limitation for legacy markerless configs. Full convergence
-      // requires either renaming the OMX TUI key or a merge strategy.
+      assert.equal(count(toml, /^\[tui\]$/gm), 1, "[tui] should appear once");
+      assert.match(toml, /^theme = "night"$/m, "user tui key preserved");
       assert.match(
         toml,
-        /status_line = \["git-branch"\]/,
-        "user tui setting preserved",
+        /^status_line = \["model-with-reasoning", "git-branch", "context-remaining", "total-input-tokens", "total-output-tokens", "five-hour-limit"\]$/m,
+        "status_line updated in-place",
       );
+    } finally {
+      await rm(wd, { recursive: true, force: true });
+    }
+  });
+
+  it("replaces an existing OMX notify entry without leaving orphan fragments behind", async () => {
+    const wd = await mkdtemp(join(tmpdir(), "omx-idem-"));
+    try {
+      const configPath = join(wd, "config.toml");
+      const existing = [
+        "[shell_environment_policy]",
+        'inherit = "all"',
+        "",
+        'notify = ["node", "/tmp/legacy-notify-hook.js"]',
+        "",
+        '    "node",',
+        '    "/tmp/legacy-notify-hook.js",',
+        "]",
+        "",
+      ].join("\n");
+      await writeFile(configPath, existing);
+
+      await mergeConfig(configPath, wd);
+      const toml = await readFile(configPath, "utf-8");
+
+      assert.equal(count(toml, /^notify\s*=/gm), 1, "notify should appear once");
+      assert.match(toml, /^notify = \["node", ".*notify-hook\.js"\]$/m);
+      assert.doesNotMatch(toml, /^\s*"node",\s*$/m, "orphan fragment removed");
+      assert.doesNotMatch(toml, /legacy-notify-hook\.js/, "legacy notify path removed");
     } finally {
       await rm(wd, { recursive: true, force: true });
     }

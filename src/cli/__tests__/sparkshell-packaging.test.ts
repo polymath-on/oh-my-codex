@@ -1,8 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { arch, platform } from 'node:os';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 
 type PackageJson = {
@@ -24,12 +26,16 @@ describe('sparkshell packaging scaffold', () => {
     const packageJsonPath = join(process.cwd(), 'package.json');
     const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8')) as PackageJson;
     const binaryName = platform() === 'win32' ? 'omx-sparkshell.exe' : 'omx-sparkshell';
-    const packagedBinaryRelativePath = join('bin', 'rust', `${platform()}-${arch()}`, binaryName);
-    const packagedBinaryPath = join(process.cwd(), packagedBinaryRelativePath);
+    const stagedRoot = mkdtempSync(join(tmpdir(), 'omx-sparkshell-stage-'));
+    const packagedBinaryRelativePath = join(`${platform()}-${arch()}`, binaryName);
+    const packagedBinaryPath = join(stagedRoot, packagedBinaryRelativePath);
 
     assert.deepEqual(pkg.bin, { omx: 'bin/omx.js' });
     assert.equal(pkg.scripts?.['build:sparkshell'], 'node scripts/build-sparkshell.mjs');
     assert.equal(pkg.scripts?.['test:sparkshell'], 'node scripts/test-sparkshell.mjs');
+    assert.equal(pkg.files?.includes('bin/omx.js'), true, 'expected package files allowlist to include bin/omx.js');
+    assert.equal(pkg.files?.includes('bin/'), false, 'did not expect broad bin/ allowlist in package files');
+    assert.equal(pkg.files?.includes('bin/native/'), false, 'did not expect package files to include bin/native/');
     assert.equal(pkg.files?.includes('bin/rust/'), false, 'did not expect package files to include bin/rust/');
     assert.equal(pkg.files?.includes('scripts/build-sparkshell.mjs'), true);
     assert.equal(pkg.files?.includes('scripts/test-sparkshell.mjs'), true);
@@ -44,7 +50,11 @@ describe('sparkshell packaging scaffold', () => {
       const buildResult = spawnSync(process.execPath, [buildScriptPath], {
         cwd: process.cwd(),
         encoding: 'utf-8',
-        env: { ...process.env, OMX_SPARKSHELL_MANIFEST: join(process.cwd(), 'crates', 'omx-sparkshell', 'Cargo.toml') },
+        env: {
+          ...process.env,
+          OMX_SPARKSHELL_MANIFEST: join(process.cwd(), 'crates', 'omx-sparkshell', 'Cargo.toml'),
+          OMX_SPARKSHELL_STAGE_DIR: stagedRoot,
+        },
       });
       assert.equal(buildResult.status, 0, buildResult.stderr || buildResult.stdout);
       assert.equal(existsSync(packagedBinaryPath), true, `expected staged binary at ${packagedBinaryRelativePath}`);
@@ -62,7 +72,7 @@ describe('sparkshell packaging scaffold', () => {
       assert.equal(packedFiles.has('scripts/test-sparkshell.mjs'), true);
       assert.equal(packedFiles.has(packagedBinaryRelativePath.replaceAll('\\', '/')), false);
     } finally {
-      rmSync(packagedBinaryPath, { force: true });
+      rmSync(stagedRoot, { force: true, recursive: true });
     }
   });
 });

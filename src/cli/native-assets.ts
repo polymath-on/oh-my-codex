@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { chmodSync, createWriteStream, existsSync } from 'node:fs';
-import { copyFile, mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, extname, join, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
@@ -189,6 +189,31 @@ async function extractArchive(archivePath: string, destinationDir: string): Prom
   }
 }
 
+async function findExtractedBinaryPath(rootDir: string, binaryPath: string): Promise<string | undefined> {
+  const normalizedNeedle = binaryPath.replaceAll('\\', '/');
+  const exactCandidate = join(rootDir, binaryPath);
+  if (existsSync(exactCandidate)) return exactCandidate;
+
+  const pending = [rootDir];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    const entries = await readdir(current, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = join(current, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(fullPath);
+        continue;
+      }
+      const relative = fullPath.slice(rootDir.length + 1).replaceAll('\\', '/');
+      if (relative === normalizedNeedle || relative.endsWith(`/${normalizedNeedle}`)) {
+        return fullPath;
+      }
+    }
+  }
+
+  return undefined;
+}
+
 export async function hydrateNativeBinary(
   product: NativeProduct,
   options: HydrateNativeBinaryOptions = {},
@@ -234,8 +259,8 @@ export async function hydrateNativeBinary(
     }
 
     await extractArchive(archivePath, extractDir);
-    const extractedBinaryPath = join(extractDir, asset.binary_path);
-    if (!existsSync(extractedBinaryPath)) {
+    const extractedBinaryPath = await findExtractedBinaryPath(extractDir, asset.binary_path);
+    if (!extractedBinaryPath) {
       throw new Error(`[native-assets] extracted archive missing expected binary ${asset.binary_path}`);
     }
 

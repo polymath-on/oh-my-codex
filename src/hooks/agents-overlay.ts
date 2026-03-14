@@ -14,7 +14,7 @@
  * - Session metadata
  */
 
-import { readFile, writeFile, mkdir, rm, readdir } from 'fs/promises';
+import { readFile, writeFile, mkdir, rm } from 'fs/promises';
 import { dirname, join } from 'path';
 import { existsSync } from 'fs';
 import {
@@ -23,6 +23,7 @@ import {
   omxProjectMemoryPath,
   packageRoot,
 } from '../utils/paths.js';
+import { isPlanningComplete, readPlanningArtifacts } from '../planning/artifacts.js';
 import { getReadScopedStateDirs, getStateDir, listModeStateFilesWithScopePreference } from '../mcp/state-paths.js';
 import { generateCodebaseMap } from './codebase-map.js';
 import { SKILL_ACTIVE_STATE_FILE } from './keyword-detector.js';
@@ -156,16 +157,13 @@ async function isRalphActive(cwd: string, sessionId?: string): Promise<boolean> 
   }
 }
 
-async function readRalphPlanningArtifacts(cwd: string): Promise<{ hasPrd: boolean; hasTestSpec: boolean }> {
-  const plansDir = join(cwd, '.omx', 'plans');
-  if (!existsSync(plansDir)) {
-    return { hasPrd: false, hasTestSpec: false };
-  }
-
-  const files = await readdir(plansDir).catch(() => [] as string[]);
-  const hasPrd = files.some((file) => /^prd-.*\.md$/i.test(file));
-  const hasTestSpec = files.some((file) => /^test-?spec-.*\.md$/i.test(file));
-  return { hasPrd, hasTestSpec };
+async function readRalphPlanningArtifacts(cwd: string): Promise<{ hasPrd: boolean; hasTestSpec: boolean; complete: boolean }> {
+  const artifacts = readPlanningArtifacts(cwd);
+  return {
+    hasPrd: artifacts.prdPaths.length > 0,
+    hasTestSpec: artifacts.testSpecPaths.length > 0,
+    complete: isPlanningComplete(artifacts),
+  };
 }
 
 async function readActiveModes(cwd: string, sessionId?: string): Promise<string> {
@@ -358,9 +356,7 @@ export async function generateOverlay(
   }
 
   if (ralphActive) {
-    const gateStatus = planningArtifacts.hasPrd && planningArtifacts.hasTestSpec
-      ? 'UNLOCKED'
-      : 'BLOCKED';
+    const gateStatus = planningArtifacts.complete ? 'UNLOCKED' : 'BLOCKED';
     const missing: string[] = [];
     if (!planningArtifacts.hasPrd) missing.push('`prd-*.md`');
     if (!planningArtifacts.hasTestSpec) missing.push('`test-spec-*.md`');
