@@ -8,6 +8,28 @@ import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { initTeamState, enqueueDispatchRequest, readDispatchRequest } from '../../team/state.js';
 
+function testEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.OMX_TEAM_WORKER;
+  delete env.OMX_TEAM_STATE_ROOT;
+  return { ...env, ...overrides };
+}
+
+async function withIsolatedTeamEnv<T>(fn: () => Promise<T>): Promise<T> {
+  const prevWorker = process.env.OMX_TEAM_WORKER;
+  const prevStateRoot = process.env.OMX_TEAM_STATE_ROOT;
+  delete process.env.OMX_TEAM_WORKER;
+  delete process.env.OMX_TEAM_STATE_ROOT;
+  try {
+    return await fn();
+  } finally {
+    if (prevWorker === undefined) delete process.env.OMX_TEAM_WORKER;
+    else process.env.OMX_TEAM_WORKER = prevWorker;
+    if (prevStateRoot === undefined) delete process.env.OMX_TEAM_STATE_ROOT;
+    else process.env.OMX_TEAM_STATE_ROOT = prevStateRoot;
+  }
+}
+
 async function appendLine(path: string, line: object): Promise<void> {
   const prev = await readFile(path, 'utf-8');
   const content = prev + `${JSON.stringify(line)}\n`;
@@ -262,7 +284,7 @@ describe('notify-fallback watcher', () => {
         {
           cwd: wd,
           stdio: 'ignore',
-          env: { ...process.env, HOME: tempHome },
+          env: testEnv({ HOME: tempHome }),
         }
       );
 
@@ -304,7 +326,7 @@ describe('notify-fallback watcher', () => {
     }
   });
 
-  it('records explicit leader-only dispatch drain state and log visibility in one-shot mode', async () => {
+  it('records explicit leader-only dispatch drain state and log visibility in one-shot mode', async () => await withIsolatedTeamEnv(async () => {
     const wd = await mkdtemp(join(tmpdir(), 'omx-fallback-dispatch-state-'));
     try {
       await initTeamState('dispatch-team', 'task', 'executor', 1, wd);
@@ -320,7 +342,7 @@ describe('notify-fallback watcher', () => {
       const result = spawnSync(
         process.execPath,
         [watcherScript, '--once', '--cwd', wd, '--notify-script', notifyHook, '--poll-ms', '50', '--dispatch-max-per-tick', '1'],
-        { encoding: 'utf-8' },
+        { encoding: 'utf-8', env: testEnv() },
       );
       assert.equal(result.status, 0, result.stderr || result.stdout);
 
@@ -341,7 +363,7 @@ describe('notify-fallback watcher', () => {
     } finally {
       await rm(wd, { recursive: true, force: true });
     }
-  });
+  }));
 
   it('runs leader nudge checks from the fallback watcher so stale alerts do not wait for a leader turn', async () => {
     const wd = await mkdtemp(join(tmpdir(), 'omx-fallback-leader-nudge-'));
@@ -377,7 +399,7 @@ describe('notify-fallback watcher', () => {
         {
           encoding: 'utf-8',
           env: {
-            ...process.env,
+            ...testEnv(),
             PATH: `${fakeBinDir}:${process.env.PATH || ''}`,
           },
         },
@@ -406,7 +428,7 @@ describe('notify-fallback watcher', () => {
     }
   });
 
-  it('runs bounded non-turn team dispatch drain tick in leader context', async () => {
+  it('runs bounded non-turn team dispatch drain tick in leader context', async () => await withIsolatedTeamEnv(async () => {
     const wd = await mkdtemp(join(tmpdir(), 'omx-fallback-dispatch-'));
     try {
       await initTeamState('dispatch-team', 'task', 'executor', 1, wd);
@@ -421,7 +443,7 @@ describe('notify-fallback watcher', () => {
       const result = spawnSync(
         process.execPath,
         [watcherScript, '--once', '--cwd', wd, '--notify-script', notifyHook, '--poll-ms', '50', '--dispatch-max-per-tick', '1'],
-        { encoding: 'utf-8' },
+        { encoding: 'utf-8', env: testEnv() },
       );
       assert.equal(result.status, 0, result.stderr || result.stdout);
       const request = await readDispatchRequest('dispatch-team', queued.request.request_id, wd);
@@ -430,9 +452,9 @@ describe('notify-fallback watcher', () => {
     } finally {
       await rm(wd, { recursive: true, force: true });
     }
-  });
+  }));
 
-  it('skips dispatch drain in worker context (leader-only guard)', async () => {
+  it('skips dispatch drain in worker context (leader-only guard)', async () => await withIsolatedTeamEnv(async () => {
     const wd = await mkdtemp(join(tmpdir(), 'omx-fallback-dispatch-worker-'));
     try {
       await initTeamState('dispatch-team', 'task', 'executor', 1, wd);
@@ -447,7 +469,7 @@ describe('notify-fallback watcher', () => {
       const result = spawnSync(
         process.execPath,
         [watcherScript, '--once', '--cwd', wd, '--notify-script', notifyHook, '--poll-ms', '50', '--dispatch-max-per-tick', '1'],
-        { encoding: 'utf-8', env: { ...process.env, OMX_TEAM_WORKER: 'dispatch-team/worker-1' } },
+        { encoding: 'utf-8', env: testEnv({ OMX_TEAM_WORKER: 'dispatch-team/worker-1' }) },
       );
       assert.equal(result.status, 0, result.stderr || result.stdout);
       const request = await readDispatchRequest('dispatch-team', queued.request.request_id, wd);
@@ -468,9 +490,9 @@ describe('notify-fallback watcher', () => {
     } finally {
       await rm(wd, { recursive: true, force: true });
     }
-  });
+  }));
 
-  it('watcher retry does not retype when pre-capture still contains trigger', async () => {
+  it('watcher retry does not retype when pre-capture still contains trigger', async () => await withIsolatedTeamEnv(async () => {
     const wd = await mkdtemp(join(tmpdir(), 'omx-fallback-dispatch-cm-'));
     const fakeBinDir = join(wd, 'fake-bin');
     const tmuxLogPath = join(wd, 'tmux.log');
@@ -493,7 +515,7 @@ describe('notify-fallback watcher', () => {
       const watcherScript = new URL('../../../scripts/notify-fallback-watcher.js', import.meta.url).pathname;
       const notifyHook = new URL('../../../scripts/notify-hook.js', import.meta.url).pathname;
       const env = {
-        ...process.env,
+        ...testEnv(),
         PATH: `${fakeBinDir}:${process.env.PATH || ''}`,
         OMX_TEST_CAPTURE_FILE: captureFile,
       };
@@ -523,7 +545,7 @@ describe('notify-fallback watcher', () => {
     } finally {
       await rm(wd, { recursive: true, force: true });
     }
-  });
+  }));
 
   it('sends bounded periodic Ralph continue steer while Ralph state stays active', async () => {
     const wd = await mkdtemp(join(tmpdir(), 'omx-fallback-ralph-active-'));
@@ -544,7 +566,7 @@ describe('notify-fallback watcher', () => {
       const watcherScript = new URL('../../../scripts/notify-fallback-watcher.js', import.meta.url).pathname;
       const notifyHook = new URL('../../../scripts/notify-hook.js', import.meta.url).pathname;
       const env = {
-        ...process.env,
+        ...testEnv(),
         PATH: `${fakeBinDir}:${process.env.PATH || ''}`,
       };
 
@@ -606,7 +628,7 @@ describe('notify-fallback watcher', () => {
       const watcherScript = new URL('../../../scripts/notify-fallback-watcher.js', import.meta.url).pathname;
       const notifyHook = new URL('../../../scripts/notify-hook.js', import.meta.url).pathname;
       const env = {
-        ...process.env,
+        ...testEnv(),
         PATH: `${fakeBinDir}:${process.env.PATH || ''}`,
       };
 
@@ -650,7 +672,7 @@ describe('notify-fallback watcher', () => {
     }
   });
 
-  it('keeps team control-plane pumping when Ralph continue steer fails', async () => {
+  it('keeps team control-plane pumping when Ralph continue steer fails', async () => await withIsolatedTeamEnv(async () => {
     const wd = await mkdtemp(join(tmpdir(), 'omx-fallback-control-plane-split-'));
     const fakeBinDir = join(wd, 'fake-bin');
     const tmuxLogPath = join(wd, 'tmux.log');
@@ -683,7 +705,7 @@ describe('notify-fallback watcher', () => {
         {
           encoding: 'utf-8',
           env: {
-            ...process.env,
+            ...testEnv(),
             PATH: `${fakeBinDir}:${process.env.PATH || ''}`,
           },
         },
@@ -712,9 +734,9 @@ describe('notify-fallback watcher', () => {
     } finally {
       await rm(wd, { recursive: true, force: true });
     }
-  });
+  }));
 
-  it('retypes on every retry when trigger is not in narrow input area', async () => {
+  it('retypes on every retry when trigger is not in narrow input area', async () => await withIsolatedTeamEnv(async () => {
     const wd = await mkdtemp(join(tmpdir(), 'omx-fallback-dispatch-cm-fallback-'));
     const fakeBinDir = join(wd, 'fake-bin');
     const tmuxLogPath = join(wd, 'tmux.log');
@@ -748,7 +770,7 @@ describe('notify-fallback watcher', () => {
       const watcherScript = new URL('../../../scripts/notify-fallback-watcher.js', import.meta.url).pathname;
       const notifyHook = new URL('../../../scripts/notify-hook.js', import.meta.url).pathname;
       const env = {
-        ...process.env,
+        ...testEnv(),
         PATH: `${fakeBinDir}:${process.env.PATH || ''}`,
         OMX_TEST_CAPTURE_SEQUENCE_FILE: captureSeqFile,
         OMX_TEST_CAPTURE_COUNTER_FILE: captureCounterFile,
@@ -773,7 +795,7 @@ describe('notify-fallback watcher', () => {
     } finally {
       await rm(wd, { recursive: true, force: true });
     }
-  });
+  }));
 
   it('exits when the tracked parent pid is gone', async () => {
     const wd = await mkdtemp(join(tmpdir(), 'omx-fallback-parent-exit-'));
@@ -809,7 +831,7 @@ describe('notify-fallback watcher', () => {
         {
           cwd: wd,
           stdio: 'ignore',
-          env: { ...process.env, HOME: tempHome },
+          env: testEnv({ HOME: tempHome }),
         }
       );
 
@@ -948,7 +970,7 @@ describe('notify-fallback watcher', () => {
         {
           cwd: wd,
           stdio: 'ignore',
-          env: { ...process.env, HOME: tempHome },
+          env: testEnv({ HOME: tempHome }),
         }
       );
       assert.ok(first.pid, 'expected first watcher pid');
@@ -980,7 +1002,7 @@ describe('notify-fallback watcher', () => {
         {
           cwd: wd,
           stdio: 'ignore',
-          env: { ...process.env, HOME: tempHome },
+          env: testEnv({ HOME: tempHome }),
         }
       );
       assert.ok(second.pid, 'expected second watcher pid');
@@ -1039,7 +1061,7 @@ describe('notify-fallback watcher', () => {
         {
           cwd: wd,
           stdio: 'ignore',
-          env: { ...process.env, HOME: tempHome },
+          env: testEnv({ HOME: tempHome }),
         }
       );
 
