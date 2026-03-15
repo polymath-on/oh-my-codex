@@ -3,8 +3,7 @@ use std::ffi::OsString;
 use std::fs::{create_dir_all, read_dir, read_to_string, remove_dir_all, write, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{ChildStdin, Command, Stdio};
-use std::sync::{Mutex, OnceLock};
+use std::process::{Command, Stdio};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -185,14 +184,18 @@ fn start_team(input: &RuntimeRunInput) -> Result<RuntimeStartResult, String> {
     )?;
 
     if input.worker_launch_mode == WorkerLaunchMode::Interactive {
-        let session =
-            match create_team_session(&sanitized_team_name, input, &worker_clis, &team_state_root) {
-                Ok(session) => session,
-                Err(error) => {
-                    let _ = remove_dir_all(&team_root);
-                    return Err(error);
-                }
-            };
+        let session = match create_team_session(
+            &sanitized_team_name,
+            input,
+            &worker_clis,
+            &team_state_root,
+        ) {
+            Ok(session) => session,
+            Err(error) => {
+                let _ = remove_dir_all(&team_root);
+                return Err(error);
+            }
+        };
 
         finalize_team_state(
             &sanitized_team_name,
@@ -211,27 +214,27 @@ fn start_team(input: &RuntimeRunInput) -> Result<RuntimeStartResult, String> {
             leader_pane_id: session.leader_pane_id,
         })
     } else {
-        let spawns = match spawn_prompt_workers(
+        let session = match create_prompt_team_session(
             &sanitized_team_name,
             input,
             &worker_clis,
             &team_state_root,
         ) {
-            Ok(spawns) => spawns,
+            Ok(session) => session,
             Err(error) => {
                 let _ = remove_dir_all(&team_root);
                 return Err(error);
             }
         };
 
-        finalize_prompt_team_state(
+        finalize_team_state(
             &sanitized_team_name,
             &start_task,
             input,
             &worker_clis,
             &team_state_root,
             &created_at,
-            &spawns,
+            &session,
         )?;
         send_worker_bootstrap_prompts(&sanitized_team_name, input, &[])?;
 
@@ -286,26 +289,6 @@ struct TeamSessionStart {
     team_target: String,
     leader_pane_id: String,
     worker_pane_ids: Vec<String>,
-}
-
-struct PromptWorkerSpawn {
-    worker_name: String,
-    pid: u32,
-}
-
-struct PromptWorkerHandle {
-    stdin: ChildStdin,
-}
-
-fn prompt_worker_registry() -> &'static Mutex<std::collections::HashMap<String, PromptWorkerHandle>>
-{
-    static REGISTRY: OnceLock<Mutex<std::collections::HashMap<String, PromptWorkerHandle>>> =
-        OnceLock::new();
-    REGISTRY.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
-}
-
-fn prompt_worker_key(team_name: &str, worker_name: &str) -> String {
-    format!("{team_name}/{worker_name}")
 }
 
 fn sanitize_team_name(name: &str) -> Result<String, String> {
@@ -521,7 +504,11 @@ fn finalize_team_state(
         .enumerate()
         .map(|(index, pane_id)| {
             let worker_name = format!("worker-{}", index + 1);
-            let pid = get_pane_pid(pane_id).unwrap_or(0);
+            let pid = if input.worker_launch_mode == WorkerLaunchMode::Prompt {
+                pane_id.parse::<u64>().unwrap_or(0)
+            } else {
+                get_pane_pid(pane_id).unwrap_or(0)
+            };
             let identity = format!(
                 "{{\"name\":{},\"index\":{},\"role\":\"executor\",\"worker_cli\":{},\"assigned_tasks\":[],\"pid\":{},\"pane_id\":{},\"working_dir\":{},\"team_state_root\":{}}}
 ",
@@ -555,6 +542,11 @@ fn finalize_team_state(
         .next()
         .unwrap_or(&session.team_target)
         .to_string();
+    let leader_pane_value = if input.worker_launch_mode == WorkerLaunchMode::Prompt {
+        "null".to_string()
+    } else {
+        json_string(&session.leader_pane_id)
+    };
     let leader_worker = env::var("OMX_TEAM_WORKER").unwrap_or_else(|_| "leader-fixed".to_string());
 
     let config = format!(
@@ -571,7 +563,7 @@ fn finalize_team_state(
         input.tasks.len() + 1,
         json_string(&input.cwd),
         json_string(&team_state_root.to_string_lossy()),
-        json_string(&session.leader_pane_id),
+        leader_pane_value,
         input.worker_count + 1,
     );
     write(team_root.join("config.json"), config)
@@ -596,7 +588,7 @@ fn finalize_team_state(
         json_string(created_at),
         json_string(&input.cwd),
         json_string(&team_state_root.to_string_lossy()),
-        json_string(&session.leader_pane_id),
+        leader_pane_value,
         input.worker_count + 1,
     );
     write(team_root.join("manifest.v2.json"), manifest)
@@ -798,6 +790,49 @@ fn create_team_session(
     })
 }
 
+fn create_prompt_team_session(
+    team_name: &str,
+    input: &RuntimeRunInput,
+    worker_clis: &[WorkerCli],
+    team_state_root: &Path,
+) -> Result<TeamSessionStart, String> {
+    let mut worker_pids = Vec::new();
+
+    for (index, worker_cli) in worker_clis.iter().enumerate() {
+        let worker_name = format!("worker-{}", index + 1);
+        let (command, args, env_parts, initial_prompt) =
+            build_prompt_worker_command(team_name, index + 1, *worker_cli, input, team_state_root);
+        let mut child = Command::new(&command)
+            .args(&args)
+            .current_dir(&input.cwd)
+            .envs(env_parts)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|err| format!("failed to spawn prompt worker {worker_name}: {err}"))?;
+
+        if let Some(prompt) = initial_prompt {
+            if let Some(stdin) = child.stdin.as_mut() {
+                stdin
+                    .write_all(prompt.as_bytes())
+                    .and_then(|_| stdin.write_all(b"\n"))
+                    .map_err(|err| {
+                        format!("failed to write prompt worker trigger for {worker_name}: {err}")
+                    })?;
+            }
+        }
+
+        worker_pids.push(child.id());
+    }
+
+    Ok(TeamSessionStart {
+        team_target: format!("prompt-{team_name}"),
+        leader_pane_id: String::new(),
+        worker_pane_ids: worker_pids.iter().map(|pid| pid.to_string()).collect(),
+    })
+}
+
 fn resolve_worker_command(worker_cli: WorkerCli) -> String {
     match worker_cli {
         WorkerCli::Codex => env::var("OMX_LEADER_CLI_PATH")
@@ -862,6 +897,82 @@ fn build_worker_start_command(
     )
 }
 
+fn build_prompt_worker_command(
+    team_name: &str,
+    worker_index: usize,
+    worker_cli: WorkerCli,
+    input: &RuntimeRunInput,
+    team_state_root: &Path,
+) -> (String, Vec<String>, Vec<(String, String)>, Option<String>) {
+    let worker_name = format!("worker-{worker_index}");
+    let command = resolve_worker_command(worker_cli);
+    let launch_args = env::var("OMX_TEAM_WORKER_LAUNCH_ARGS")
+        .ok()
+        .map(|value| {
+            value
+                .split_whitespace()
+                .map(|part| part.to_string())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let mut args = launch_args;
+    if worker_cli == WorkerCli::Codex
+        && !args
+            .iter()
+            .any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox")
+    {
+        args.push("--dangerously-bypass-approvals-and-sandbox".to_string());
+    }
+    let initial_prompt = if worker_cli == WorkerCli::Gemini {
+        Some(format!(
+            "Read .omx/state/team/{team_name}/workers/{worker_name}/inbox.md, start work now, report concrete progress, then continue assigned work or next feasible task."
+        ))
+    } else {
+        None
+    };
+    if let Some(prompt) = initial_prompt.as_ref() {
+        if worker_cli == WorkerCli::Gemini {
+            args.extend([
+                "--approval-mode".to_string(),
+                "yolo".to_string(),
+                "-i".to_string(),
+                prompt.clone(),
+            ]);
+        }
+    }
+    let env_parts = vec![
+        (
+            "OMX_TEAM_WORKER".to_string(),
+            format!("{team_name}/{worker_name}"),
+        ),
+        (
+            "OMX_TEAM_STATE_ROOT".to_string(),
+            team_state_root.to_string_lossy().into_owned(),
+        ),
+        ("OMX_TEAM_LEADER_CWD".to_string(), input.cwd.clone()),
+        (
+            "OMX_TEAM_WORKER_CLI".to_string(),
+            worker_cli.as_str().to_string(),
+        ),
+        (
+            "OMX_TEAM_WORKER_LAUNCH_MODE".to_string(),
+            "prompt".to_string(),
+        ),
+    ];
+    (
+        command,
+        args,
+        env_parts,
+        if worker_cli == WorkerCli::Codex {
+            Some(format!(
+        "Read .omx/state/team/{team_name}/workers/{worker_name}/inbox.md, start work now, report concrete progress, then continue assigned work or next feasible task."
+    ))
+        } else {
+            None
+        },
+    )
+}
+
 fn shell_quote_single(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
@@ -885,6 +996,9 @@ fn send_worker_bootstrap_prompts(
     input: &RuntimeRunInput,
     worker_pane_ids: &[String],
 ) -> Result<(), String> {
+    if input.worker_launch_mode == WorkerLaunchMode::Prompt {
+        return Ok(());
+    }
     sleep(Duration::from_millis(1500));
     for (index, pane_id) in worker_pane_ids.iter().enumerate() {
         let worker_name = format!("worker-{}", index + 1);
@@ -1074,6 +1188,11 @@ fn shutdown_and_emit_result(
     Ok(())
 }
 
+const SHUTDOWN_ACK_WAIT_MS: u64 = 15_000;
+const SHUTDOWN_ACK_POLL_MS: u64 = 100;
+const PROMPT_WORKER_SIGTERM_WAIT_MS: u64 = 1_000;
+const PROMPT_WORKER_SIGKILL_WAIT_MS: u64 = 1_000;
+
 fn shutdown_team(team_name: &str, cwd: &str, force: bool, ralph: bool) -> Result<(), String> {
     let statuses = list_task_statuses(team_name, cwd);
     let total = statuses.len();
@@ -1144,37 +1263,73 @@ fn shutdown_team(team_name: &str, cwd: &str, force: bool, ralph: bool) -> Result
 
     let config_path = team_dir(team_name, cwd).join("config.json");
     if let Ok(raw) = read_to_string(&config_path) {
-        for worker_name in extract_worker_names(&raw) {
-            let requested_at = iso_timestamp();
-            let _ =
-                write_shutdown_request(team_name, &worker_name, "leader-fixed", cwd, &requested_at);
-            if let Some(ack) = read_shutdown_ack(team_name, &worker_name, cwd, Some(&requested_at))
-            {
-                let reason = ack
-                    .reason
-                    .filter(|value| !value.is_empty())
-                    .unwrap_or_else(|| "no_reason".to_string());
-                let event_reason = if ack.status == "reject" {
-                    format!("reject:{reason}")
+        let worker_names = extract_worker_names(&raw);
+        let mut shutdown_requests = worker_names
+            .iter()
+            .map(|worker_name| {
+                let requested_at = iso_timestamp();
+                let _ = write_shutdown_request(
+                    team_name,
+                    worker_name,
+                    "leader-fixed",
+                    cwd,
+                    &requested_at,
+                );
+                (worker_name.clone(), requested_at)
+            })
+            .collect::<Vec<_>>();
+        let deadline = Instant::now() + Duration::from_millis(SHUTDOWN_ACK_WAIT_MS);
+        while !shutdown_requests.is_empty() && Instant::now() < deadline {
+            let mut pending = Vec::new();
+            for (worker_name, requested_at) in shutdown_requests.into_iter() {
+                if let Some(ack) =
+                    read_shutdown_ack(team_name, &worker_name, cwd, Some(&requested_at))
+                {
+                    let reason = ack
+                        .reason
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or_else(|| "no_reason".to_string());
+                    let event_reason = if ack.status == "reject" {
+                        format!("reject:{reason}")
+                    } else {
+                        "accept".to_string()
+                    };
+                    let _ = append_team_event(
+                        team_name,
+                        cwd,
+                        "shutdown_ack",
+                        &worker_name,
+                        &event_reason,
+                    );
+                    if ack.status == "reject" && !force {
+                        return Err(format!("shutdown_rejected:{worker_name}:{reason}"));
+                    }
                 } else {
-                    "accept".to_string()
-                };
-                let _ =
-                    append_team_event(team_name, cwd, "shutdown_ack", &worker_name, &event_reason);
-                if ack.status == "reject" && !force {
-                    return Err(format!("shutdown_rejected:{worker_name}:{reason}"));
+                    pending.push((worker_name, requested_at));
                 }
             }
+            shutdown_requests = pending;
+            if !shutdown_requests.is_empty() {
+                sleep(Duration::from_millis(SHUTDOWN_ACK_POLL_MS));
+            }
         }
-        for pane_id in extract_object_string_values(&raw, "pane_id") {
-            let _ = kill_tmux_pane(&pane_id);
-        }
-        if let Some(hud_pane_id) = extract_json_string(&raw, "hud_pane_id") {
-            let _ = kill_tmux_pane(&hud_pane_id);
-        }
-        if let Some(hook_target) = extract_json_string(&raw, "resize_hook_target") {
-            if let Some(hook_name) = extract_json_string(&raw, "resize_hook_name") {
-                let _ = unregister_resize_hook(&hook_target, &hook_name);
+        let worker_launch_mode = extract_json_string(&raw, "worker_launch_mode")
+            .unwrap_or_else(|| "interactive".to_string());
+        if worker_launch_mode == "prompt" {
+            for pid in extract_object_number_values(&raw, "pid") {
+                let _ = kill_pid(pid as i32);
+            }
+        } else {
+            for pane_id in extract_object_string_values(&raw, "pane_id") {
+                let _ = kill_tmux_pane(&pane_id);
+            }
+            if let Some(hud_pane_id) = extract_json_string(&raw, "hud_pane_id") {
+                let _ = kill_tmux_pane(&hud_pane_id);
+            }
+            if let Some(hook_target) = extract_json_string(&raw, "resize_hook_target") {
+                if let Some(hook_name) = extract_json_string(&raw, "resize_hook_name") {
+                    let _ = unregister_resize_hook(&hook_target, &hook_name);
+                }
             }
         }
     }
@@ -2357,6 +2512,39 @@ fn is_pid_alive(pid: i32) -> bool {
         .unwrap_or(false)
 }
 
+fn wait_for_pid_exit(pid: i32, timeout_ms: u64) -> bool {
+    if !is_pid_alive(pid) {
+        return true;
+    }
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    while Instant::now() < deadline {
+        sleep(Duration::from_millis(100));
+        if !is_pid_alive(pid) {
+            return true;
+        }
+    }
+    !is_pid_alive(pid)
+}
+
+fn kill_pid(pid: i32) -> Result<(), String> {
+    Command::new("kill")
+        .args(["-TERM", &pid.to_string()])
+        .output()
+        .map_err(|err| format!("failed to launch kill: {err}"))?;
+    if wait_for_pid_exit(pid, PROMPT_WORKER_SIGTERM_WAIT_MS) {
+        return Ok(());
+    }
+    Command::new("kill")
+        .args(["-KILL", &pid.to_string()])
+        .output()
+        .map_err(|err| format!("failed to launch kill -KILL: {err}"))?;
+    if wait_for_pid_exit(pid, PROMPT_WORKER_SIGKILL_WAIT_MS) {
+        Ok(())
+    } else {
+        Err(format!("pid {pid} still alive after SIGKILL"))
+    }
+}
+
 fn kill_tmux_pane(pane_id: &str) -> Result<(), String> {
     let output = Command::new("tmux")
         .args(["kill-pane", "-t", pane_id])
@@ -2735,6 +2923,28 @@ fn extract_string_array(raw: &str, key: &str) -> Vec<String> {
         .collect()
 }
 
+fn extract_object_number_values(raw: &str, key: &str) -> Vec<u64> {
+    let needle = format!("\"{key}\"");
+    let mut values = Vec::new();
+    let mut slice = raw;
+    while let Some(index) = slice.find(&needle) {
+        let after = &slice[index + needle.len()..];
+        let Some(colon_index) = after.find(':') else {
+            break;
+        };
+        let value_start = after[colon_index + 1..].trim_start();
+        let digits = value_start
+            .chars()
+            .take_while(|ch| ch.is_ascii_digit())
+            .collect::<String>();
+        if let Ok(value) = digits.parse::<u64>() {
+            values.push(value);
+        }
+        slice = &after[colon_index + 1..];
+    }
+    values
+}
+
 fn extract_object_string_values(raw: &str, key: &str) -> Vec<String> {
     let needle = format!("\"{key}\"");
     let mut values = Vec::new();
@@ -2900,9 +3110,10 @@ fn slice_object_body(value_start: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_task_results, detect_dead_worker_failure, extract_json_bool, extract_string_array,
-        finalize_team_state, has_structured_verification_evidence, initialize_team_state,
-        monitor_team, parse_runtime_input, read_linked_ralph_profile, resolve_lifecycle_profile,
+        collect_task_results, create_prompt_team_session, detect_dead_worker_failure,
+        extract_json_bool, extract_string_array, finalize_team_state,
+        has_structured_verification_evidence, initialize_team_state, monitor_team,
+        parse_runtime_input, read_linked_ralph_profile, resolve_lifecycle_profile,
         resolve_runtime_lifecycle_profile, shutdown_team, split_json_array_entries,
         write_panes_sidecar_placeholder, write_phase_state, RuntimeRunInput, RuntimeTaskInput,
         TeamSessionStart, WorkerCli, WorkerLaunchMode,
@@ -2912,6 +3123,8 @@ mod tests {
     use std::fs::{create_dir_all, read_to_string, set_permissions, write};
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
+    use std::process::Command;
+    use std::time::Duration;
 
     #[test]
     fn parses_minimal_runtime_run_input() {
@@ -3178,6 +3391,101 @@ mod tests {
         assert!(final_config.contains("\"lifecycle_profile\":\"linked_ralph\""));
         assert!(final_manifest.contains("\"lifecycle_profile\":\"linked_ralph\""));
 
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn prompt_team_session_uses_pid_identity_without_tmux() {
+        let temp =
+            std::env::temp_dir().join(format!("omx-runtime-prompt-session-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp);
+        create_dir_all(temp.join(".omx").join("state")).expect("state dir");
+        let input = RuntimeRunInput {
+            team_name: "alpha".into(),
+            agent_types: vec!["codex".into()],
+            tasks: vec![RuntimeTaskInput {
+                subject: "one".into(),
+                description: "desc".into(),
+                owner: None,
+                blocked_by: Vec::new(),
+                role: None,
+            }],
+            cwd: temp.to_string_lossy().into_owned(),
+            worker_count: 1,
+            poll_interval_ms: 10,
+            worker_launch_mode: WorkerLaunchMode::Prompt,
+        };
+        let created_at = "2026-03-14T00:00:00.000Z";
+        let team_state_root = temp.join(".omx").join("state");
+        initialize_team_state(
+            "alpha",
+            "one",
+            &input,
+            &[WorkerCli::Codex],
+            &team_state_root,
+            created_at,
+        )
+        .expect("init");
+        let session =
+            create_prompt_team_session("alpha", &input, &[WorkerCli::Codex], &team_state_root)
+                .expect("prompt session");
+        finalize_team_state(
+            "alpha",
+            "one",
+            &input,
+            &[WorkerCli::Codex],
+            &team_state_root,
+            created_at,
+            &session,
+        )
+        .expect("finalize");
+        let config = read_to_string(
+            team_state_root
+                .join("team")
+                .join("alpha")
+                .join("config.json"),
+        )
+        .expect("config");
+        let identity = read_to_string(
+            team_state_root
+                .join("team")
+                .join("alpha")
+                .join("workers")
+                .join("worker-1")
+                .join("identity.json"),
+        )
+        .expect("identity");
+        assert!(config.contains("\"tmux_session\":\"prompt-alpha\""));
+        assert!(config.contains("\"leader_pane_id\":null"));
+        assert!(identity.contains("\"pid\":"));
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn shutdown_team_force_handles_prompt_worker_pid_without_tmux_pane() {
+        let temp = std::env::temp_dir().join(format!(
+            "omx-runtime-prompt-shutdown-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&temp);
+        let team_dir = temp.join(".omx").join("state").join("team").join("alpha");
+        create_dir_all(team_dir.join("workers").join("worker-1")).expect("team dir");
+        create_dir_all(team_dir.join("tasks")).expect("task dir");
+        write(
+            team_dir.join("tasks").join("task-1.json"),
+            r#"{"id":"1","status":"completed"}"#,
+        )
+        .expect("task");
+        let child = Command::new("sh")
+            .args(["-lc", "exec sleep 30"])
+            .spawn()
+            .expect("sleep proc");
+        let pid = child.id();
+        write(team_dir.join("config.json"), format!(r#"{{"name":"alpha","worker_launch_mode":"prompt","workers":[{{"name":"worker-1","pid":{pid}}}],"tmux_session":"prompt-alpha","leader_pane_id":null,"hud_pane_id":null,"resize_hook_name":null,"resize_hook_target":null}}"#)).expect("config");
+        shutdown_team("alpha", temp.to_string_lossy().as_ref(), true, false).expect("shutdown ok");
+        let _ = Command::new("kill")
+            .args(["-KILL", &pid.to_string()])
+            .output();
         let _ = std::fs::remove_dir_all(&temp);
     }
 
@@ -3964,6 +4272,55 @@ mod tests {
         assert!(ralph_state.contains("\"linked_team_terminal_phase\":\"cancelled\""));
         assert!(ralph_state.contains("\"linked_team_terminal_at\":\""));
         assert!(ralph_state.contains("\"completed_at\":\""));
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn shutdown_team_waits_for_delayed_shutdown_rejection() {
+        let temp = std::env::temp_dir().join(format!(
+            "omx-runtime-delayed-shutdown-ack-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&temp);
+
+        let team_dir = temp.join(".omx").join("state").join("team").join("alpha");
+        let worker_dir = team_dir.join("workers").join("worker-1");
+        let tasks_dir = team_dir.join("tasks");
+        create_dir_all(&worker_dir).expect("worker dir");
+        create_dir_all(&tasks_dir).expect("task dir");
+        write(
+            team_dir.join("config.json"),
+            r#"{"name":"alpha","worker_launch_mode":"interactive","workers":[{"name":"worker-1","pane_id":"%999"}],"tmux_session":"omx-team-alpha","leader_pane_id":null,"hud_pane_id":null,"resize_hook_name":null,"resize_hook_target":null}"#,
+        )
+        .expect("config");
+        write(
+            tasks_dir.join("task-1.json"),
+            r#"{"id":"1","status":"completed"}"#,
+        )
+        .expect("task");
+
+        let ack_path = worker_dir.join("shutdown-ack.json");
+        std::thread::spawn({
+            let ack_path = ack_path.clone();
+            move || {
+                std::thread::sleep(Duration::from_millis(150));
+                write(
+                    ack_path,
+                    r#"{"status":"reject","reason":"busy","updated_at":"9999-12-31T23:59:59Z"}"#,
+                )
+                .expect("ack");
+            }
+        });
+
+        let error = shutdown_team("alpha", temp.to_string_lossy().as_ref(), false, false)
+            .expect_err("expected delayed rejection");
+        assert!(error.contains("shutdown_rejected:worker-1:busy"));
+
+        let events =
+            read_to_string(team_dir.join("events").join("events.ndjson")).expect("expected events");
+        assert!(events.contains("\"type\":\"shutdown_ack\""));
+        assert!(events.contains("reject:busy"));
 
         let _ = std::fs::remove_dir_all(&temp);
     }
