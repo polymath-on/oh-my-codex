@@ -8,7 +8,7 @@ function read(relativePath: string): string {
 }
 
 describe('TS→Rust parity lanes doc contract', () => {
-  it('documents the four parity lanes with TypeScript as SSOT and Rust boundary status', () => {
+  it('documents the five parity lanes with TypeScript as SSOT and Rust boundary status', () => {
     const relativePath = 'docs/reference/ts-rust-parity-lanes.md';
     const fullPath = join(process.cwd(), relativePath);
 
