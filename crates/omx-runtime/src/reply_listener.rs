@@ -18,6 +18,7 @@ struct NativeReplyListenerState {
     discord_last_message_id: Option<String>,
     messages_injected: u64,
     errors: u64,
+    last_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,9 +27,13 @@ struct NativeReplyListenerConfig {
     discord_bot_token: Option<String>,
     discord_channel_id: Option<String>,
     telegram_enabled: bool,
+    telegram_bot_token: Option<String>,
+    telegram_chat_id: Option<String>,
     poll_interval_ms: u64,
     rate_limit_per_minute: u32,
     max_message_length: u32,
+    include_prefix: bool,
+    authorized_discord_user_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,9 +98,31 @@ fn parse_reply_listener_config(raw: &str) -> NativeReplyListenerConfig {
         discord_bot_token: extract_string(raw, "discordBotToken"),
         discord_channel_id: extract_string(raw, "discordChannelId"),
         telegram_enabled: extract_bool(raw, "telegramEnabled").unwrap_or(false),
-        poll_interval_ms: extract_u64(raw, "pollIntervalMs").unwrap_or(DEFAULT_POLL_INTERVAL_MS),
-        rate_limit_per_minute: extract_u32(raw, "rateLimitPerMinute").unwrap_or(10),
-        max_message_length: extract_u32(raw, "maxMessageLength").unwrap_or(500),
+        telegram_bot_token: extract_string(raw, "telegramBotToken"),
+        telegram_chat_id: extract_string(raw, "telegramChatId"),
+        poll_interval_ms: clamp_u64(extract_u64(raw, "pollIntervalMs"), DEFAULT_POLL_INTERVAL_MS, 500, 60_000),
+        rate_limit_per_minute: clamp_u32(extract_u32(raw, "rateLimitPerMinute"), 10, 1, None),
+        max_message_length: clamp_u32(extract_u32(raw, "maxMessageLength"), 500, 1, Some(4_000)),
+        include_prefix: extract_bool(raw, "includePrefix").unwrap_or(true),
+        authorized_discord_user_ids: extract_string_array(raw, "authorizedDiscordUserIds"),
+    }
+}
+
+fn clamp_u64(value: Option<u64>, fallback: u64, min: u64, max: u64) -> u64 {
+    match value {
+        Some(value) if value < min => min,
+        Some(value) if value > max => max,
+        Some(value) => value,
+        None => fallback,
+    }
+}
+
+fn clamp_u32(value: Option<u32>, fallback: u32, min: u32, max: Option<u32>) -> u32 {
+    match value {
+        Some(value) if value < min => min,
+        Some(value) if max.is_some_and(|max| value > max) => max.unwrap_or(value),
+        Some(value) => value,
+        None => fallback,
     }
 }
 
@@ -240,6 +267,67 @@ fn extract_u64(raw: &str, key: &str) -> Option<u64> {
     let value = rest[colon + 1..].trim_start();
     let digits: String = value.chars().take_while(|c| c.is_ascii_digit()).collect();
     digits.parse::<u64>().ok()
+}
+
+fn extract_string_array(raw: &str, key: &str) -> Vec<String> {
+    let needle = format!("\"{key}\"");
+    let Some(idx) = raw.find(&needle) else {
+        return Vec::new();
+    };
+    let rest = &raw[idx + needle.len()..];
+    let Some(colon) = rest.find(':') else {
+        return Vec::new();
+    };
+    let value = rest[colon + 1..].trim_start();
+    if !value.starts_with('[') {
+        return Vec::new();
+    }
+
+    let mut items = Vec::new();
+    let mut current = &value[1..];
+    loop {
+        let trimmed = current.trim_start();
+        if trimmed.starts_with(']') {
+            break;
+        }
+        let Some(parsed) = parse_json_string(trimmed) else {
+            break;
+        };
+        if !parsed.trim().is_empty() {
+            items.push(parsed);
+        }
+        let Some(closing_quote) = find_closing_quote(trimmed) else {
+            break;
+        };
+        current = &trimmed[closing_quote + 1..];
+        let trimmed = current.trim_start();
+        if let Some(next) = trimmed.strip_prefix(',') {
+            current = next;
+            continue;
+        }
+        break;
+    }
+    items
+}
+
+fn find_closing_quote(raw: &str) -> Option<usize> {
+    let mut chars = raw.char_indices();
+    if chars.next()?.1 != '"' {
+        return None;
+    }
+    let mut escaped = false;
+    for (idx, ch) in chars {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' => escaped = true,
+            '"' => return Some(idx),
+            _ => {}
+        }
+    }
+    None
 }
 
 fn read_discord_last_message_id(state_dir: &str) -> Option<String> {
@@ -441,6 +529,7 @@ fn read_native_state(state_dir: &str) -> Option<NativeReplyListenerState> {
         discord_last_message_id: extract_string(&raw, "discordLastMessageId"),
         messages_injected: extract_u64(&raw, "messagesInjected").unwrap_or(0),
         errors: extract_u64(&raw, "errors").unwrap_or(0),
+        last_error: extract_string(&raw, "lastError"),
     })
 }
 
@@ -475,6 +564,7 @@ fn run_poll_iteration(
             }
             Err(error) => {
                 state.errors += 1;
+                state.last_error = Some(error.clone());
                 append_log_line(
                     state_dir,
                     &format!("[native-runtime] discord poll error: {error}\n"),
@@ -482,6 +572,8 @@ fn run_poll_iteration(
             }
         }
     } else if config.telegram_enabled {
+        state.errors += 1;
+        state.last_error = Some("telegram polling not yet implemented in native runtime".to_string());
         append_log_line(
             state_dir,
             "[native-runtime] telegram polling not yet implemented in native runtime\n",
@@ -492,6 +584,7 @@ fn run_poll_iteration(
         state.discord_last_message_id = next_state.discord_last_message_id;
         state.messages_injected = next_state.messages_injected;
         state.errors = state.errors.max(next_state.errors);
+        state.last_error = next_state.last_error;
     }
 
     write_state(state_dir, state)
@@ -514,6 +607,7 @@ fn start_reply_listener(run_once: bool) -> Result<(), String> {
         discord_last_message_id: None,
         messages_injected: 0,
         errors: 0,
+        last_error: None,
     });
     state.is_running = true;
     state.pid = Some(pid);
@@ -621,6 +715,7 @@ fn stop_reply_listener() -> Result<(), String> {
             discord_last_message_id: None,
             messages_injected: 0,
             errors: 0,
+            last_error: None,
         });
         state.is_running = false;
         state.pid = None;
@@ -836,7 +931,17 @@ fn extract_pid(raw: &str) -> Option<u32> {
 }
 
 fn sanitize_reply_input(raw: &str) -> String {
-    raw.replace(['\n', '\r'], " ").trim().to_string()
+    raw.chars()
+        .filter(|ch| !matches!(ch, '\u{0000}'..='\u{0008}' | '\u{000B}' | '\u{000C}' | '\u{000E}'..='\u{001F}' | '\u{007F}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'))
+        .collect::<String>()
+        .replace("\r\n", " ")
+        .replace(['\n', '\r'], " ")
+        .replace('\\', "\\\\")
+        .replace('`', "\\`")
+        .replace("$(", "\\$(")
+        .replace("${", "\\${")
+        .trim()
+        .to_string()
 }
 
 fn append_injection_log(
@@ -945,7 +1050,7 @@ fn update_discord_last_message_id(state_dir: &str, message_id: &str) -> Result<(
         .unwrap_or(0);
     let now = current_timestamp();
     let content = format!(
-        "{{\"isRunning\":true,\"pid\":{},\"startedAt\":\"{}\",\"lastPollAt\":\"{}\",\"telegramLastUpdateId\":null,\"discordLastMessageId\":\"{}\",\"messagesInjected\":{},\"errors\":{}}}\n",
+        "{{\"isRunning\":true,\"pid\":{},\"startedAt\":\"{}\",\"lastPollAt\":\"{}\",\"telegramLastUpdateId\":null,\"discordLastMessageId\":\"{}\",\"messagesInjected\":{},\"errors\":{},\"lastError\":null}}\n",
         std::process::id(),
         started_at,
         now,
@@ -966,7 +1071,7 @@ mod tests {
         build_discord_fetch_command, discord_fetch_command, extract_pid, inject_reply_command,
         is_reply_listener_process, lookup_message_command, parse_first_discord_message,
         parse_reply_listener_config, perform_discord_fetch, process_first_discord_reply,
-        run_reply_listener, status_reply_listener, stop_reply_listener,
+        run_reply_listener, sanitize_reply_input, status_reply_listener, stop_reply_listener,
     };
     use crate::test_support::env_lock;
     use std::fs::read_to_string;
@@ -1065,6 +1170,12 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_reply_input_matches_ts_guardrails() {
+        let sanitized = sanitize_reply_input("$(rm -rf /)\n`hi`\0${PATH}\u{202E}ok\\end");
+        assert_eq!(sanitized, "\\$(rm -rf /) \\`hi\\`\\${PATH}ok\\\\end");
+    }
+
+    #[test]
     fn reply_listener_once_runs() {
         with_temp_home("runs", |state_dir| {
             std::fs::write(
@@ -1155,6 +1266,22 @@ mod tests {
         assert_eq!(parsed.discord_channel_id.as_deref(), Some("chan"));
         assert_eq!(parsed.rate_limit_per_minute, 7);
         assert_eq!(parsed.max_message_length, 123);
+        assert!(parsed.include_prefix);
+        assert!(parsed.authorized_discord_user_ids.is_empty());
+    }
+
+    #[test]
+    fn parses_and_clamps_extended_reply_listener_config() {
+        let parsed = parse_reply_listener_config(
+            r#"{"discordEnabled":true,"discordBotToken":"abc","discordChannelId":"chan","telegramEnabled":true,"telegramBotToken":"tg","telegramChatId":"chat","pollIntervalMs":1,"rateLimitPerMinute":0,"maxMessageLength":999999,"includePrefix":false,"authorizedDiscordUserIds":["123","","  ","456"]}"#,
+        );
+        assert_eq!(parsed.telegram_bot_token.as_deref(), Some("tg"));
+        assert_eq!(parsed.telegram_chat_id.as_deref(), Some("chat"));
+        assert_eq!(parsed.poll_interval_ms, 500);
+        assert_eq!(parsed.rate_limit_per_minute, 1);
+        assert_eq!(parsed.max_message_length, 4_000);
+        assert!(!parsed.include_prefix);
+        assert_eq!(parsed.authorized_discord_user_ids, vec!["123", "456"]);
     }
 
     #[test]
