@@ -21,6 +21,9 @@ pub struct RuntimeRunInput {
 pub struct RuntimeTaskInput {
     pub subject: String,
     pub description: String,
+    pub owner: Option<String>,
+    pub blocked_by: Vec<String>,
+    pub role: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,9 +59,25 @@ struct TaskResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RuntimeTaskStateRecord {
     id: String,
+    subject: String,
+    description: String,
     status: String,
+    owner: Option<String>,
+    role: Option<String>,
+    blocked_by: Vec<String>,
+    depends_on: Vec<String>,
+    version: usize,
+    created_at: String,
+    claim_leased_until: Option<String>,
     requires_code_change: bool,
     result: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RebalanceDecision {
+    task_id: String,
+    worker_name: String,
+    reason: String,
 }
 
 pub fn run_runtime(args: &[String]) -> Result<(), String> {
@@ -303,12 +322,22 @@ fn initialize_team_state(
 
     for (index, task) in input.tasks.iter().enumerate() {
         let body = format!(
-            "{{\"id\":{},\"subject\":{},\"description\":{},\"status\":\"pending\",\"depends_on\":[],\"version\":1,\"created_at\":{}}}
+            "{{\"id\":{},\"subject\":{},\"description\":{},\"status\":\"pending\",\"depends_on\":{},\"blocked_by\":{},\"version\":1,\"created_at\":{},\"owner\":{},\"role\":{}}}
 ",
             json_string(&(index + 1).to_string()),
             json_string(&task.subject),
             json_string(&task.description),
+            json_string_array(&task.blocked_by),
+            json_string_array(&task.blocked_by),
             json_string(created_at),
+            task.owner
+                .as_deref()
+                .map(json_string)
+                .unwrap_or_else(|| "null".to_string()),
+            task.role
+                .as_deref()
+                .map(json_string)
+                .unwrap_or_else(|| "null".to_string()),
         );
         write(tasks_root.join(format!("task-{}.json", index + 1)), body)
             .map_err(|err| format!("failed writing task state: {err}"))?;
@@ -350,12 +379,14 @@ fn initialize_team_state(
         .join(",");
     let team_state_root_str = team_state_root.to_string_lossy().to_string();
     let leader_worker = env::var("OMX_TEAM_WORKER").unwrap_or_else(|_| "leader-fixed".to_string());
+    let lifecycle_profile = resolve_lifecycle_profile(team_name, &input.cwd);
 
     let config = format!(
-        "{{\"name\":{},\"task\":{},\"agent_type\":\"executor\",\"worker_launch_mode\":\"interactive\",\"lifecycle_profile\":\"default\",\"worker_count\":{},\"max_workers\":20,\"workers\":[{}],\"created_at\":{},\"tmux_session\":{},\"next_task_id\":{},\"leader_cwd\":{},\"team_state_root\":{},\"workspace_mode\":\"single\",\"leader_pane_id\":null,\"hud_pane_id\":null,\"resize_hook_name\":null,\"resize_hook_target\":null,\"next_worker_index\":{}}}
+        "{{\"name\":{},\"task\":{},\"agent_type\":\"executor\",\"worker_launch_mode\":\"interactive\",\"lifecycle_profile\":{},\"worker_count\":{},\"max_workers\":20,\"workers\":[{}],\"created_at\":{},\"tmux_session\":{},\"next_task_id\":{},\"leader_cwd\":{},\"team_state_root\":{},\"workspace_mode\":\"single\",\"leader_pane_id\":null,\"hud_pane_id\":null,\"resize_hook_name\":null,\"resize_hook_target\":null,\"next_worker_index\":{}}}
 ",
         json_string(team_name),
         json_string(start_task),
+        json_string(lifecycle_profile),
         input.worker_count,
         worker_json,
         json_string(created_at),
@@ -369,12 +400,13 @@ fn initialize_team_state(
         .map_err(|err| format!("failed writing team config: {err}"))?;
 
     let manifest = format!(
-        "{{\"schema_version\":2,\"name\":{},\"task\":{},\"leader\":{{\"session_id\":{},\"worker_id\":{},\"role\":\"leader\"}},\"policy\":{{\"display_mode\":\"split_pane\",\"worker_launch_mode\":\"interactive\",\"dispatch_mode\":\"hook_preferred_with_fallback\",\"dispatch_ack_timeout_ms\":2000}},\"governance\":{{\"delegation_only\":false,\"plan_approval_required\":false,\"nested_teams_allowed\":false,\"one_team_per_leader_session\":true,\"cleanup_requires_all_workers_inactive\":true}},\"lifecycle_profile\":\"default\",\"permissions_snapshot\":{{\"approval_mode\":{},\"sandbox_mode\":{},\"network_access\":true}},\"tmux_session\":{},\"worker_count\":{},\"workers\":[{}],\"next_task_id\":{},\"created_at\":{},\"leader_cwd\":{},\"team_state_root\":{},\"workspace_mode\":\"single\",\"leader_pane_id\":null,\"hud_pane_id\":null,\"resize_hook_name\":null,\"resize_hook_target\":null,\"next_worker_index\":{}}}
+        "{{\"schema_version\":2,\"name\":{},\"task\":{},\"leader\":{{\"session_id\":{},\"worker_id\":{},\"role\":\"leader\"}},\"policy\":{{\"display_mode\":\"split_pane\",\"worker_launch_mode\":\"interactive\",\"dispatch_mode\":\"hook_preferred_with_fallback\",\"dispatch_ack_timeout_ms\":2000}},\"governance\":{{\"delegation_only\":false,\"plan_approval_required\":false,\"nested_teams_allowed\":false,\"one_team_per_leader_session\":true,\"cleanup_requires_all_workers_inactive\":true}},\"lifecycle_profile\":{},\"permissions_snapshot\":{{\"approval_mode\":{},\"sandbox_mode\":{},\"network_access\":true}},\"tmux_session\":{},\"worker_count\":{},\"workers\":[{}],\"next_task_id\":{},\"created_at\":{},\"leader_cwd\":{},\"team_state_root\":{},\"workspace_mode\":\"single\",\"leader_pane_id\":null,\"hud_pane_id\":null,\"resize_hook_name\":null,\"resize_hook_target\":null,\"next_worker_index\":{}}}
 ",
         json_string(team_name),
         json_string(start_task),
         json_string(&format!("native-runtime-{team_name}")),
         json_string(&leader_worker),
+        json_string(lifecycle_profile),
         json_string(&env::var("CODEX_APPROVAL_MODE").unwrap_or_else(|_| "never".to_string())),
         json_string(&env::var("CODEX_SANDBOX_MODE").unwrap_or_else(|_| "danger-full-access".to_string())),
         json_string(&format!("omx-team-{team_name}")),
@@ -402,6 +434,7 @@ fn finalize_team_state(
     session: &TeamSessionStart,
 ) -> Result<(), String> {
     let team_root = team_state_root.join("team").join(team_name);
+    let lifecycle_profile = resolve_lifecycle_profile(team_name, &input.cwd);
     let workers_json = session
         .worker_pane_ids
         .iter()
@@ -445,10 +478,11 @@ fn finalize_team_state(
     let leader_worker = env::var("OMX_TEAM_WORKER").unwrap_or_else(|_| "leader-fixed".to_string());
 
     let config = format!(
-        "{{\"name\":{},\"task\":{},\"agent_type\":\"executor\",\"worker_launch_mode\":\"interactive\",\"lifecycle_profile\":\"default\",\"worker_count\":{},\"max_workers\":20,\"workers\":[{}],\"created_at\":{},\"tmux_session\":{},\"next_task_id\":{},\"leader_cwd\":{},\"team_state_root\":{},\"workspace_mode\":\"single\",\"leader_pane_id\":{},\"hud_pane_id\":null,\"resize_hook_name\":null,\"resize_hook_target\":null,\"next_worker_index\":{}}}
+        "{{\"name\":{},\"task\":{},\"agent_type\":\"executor\",\"worker_launch_mode\":\"interactive\",\"lifecycle_profile\":{},\"worker_count\":{},\"max_workers\":20,\"workers\":[{}],\"created_at\":{},\"tmux_session\":{},\"next_task_id\":{},\"leader_cwd\":{},\"team_state_root\":{},\"workspace_mode\":\"single\",\"leader_pane_id\":{},\"hud_pane_id\":null,\"resize_hook_name\":null,\"resize_hook_target\":null,\"next_worker_index\":{}}}
 ",
         json_string(team_name),
         json_string(start_task),
+        json_string(lifecycle_profile),
         input.worker_count,
         workers_json,
         json_string(created_at),
@@ -463,12 +497,13 @@ fn finalize_team_state(
         .map_err(|err| format!("failed updating team config: {err}"))?;
 
     let manifest = format!(
-        "{{\"schema_version\":2,\"name\":{},\"task\":{},\"leader\":{{\"session_id\":{},\"worker_id\":{},\"role\":\"leader\"}},\"policy\":{{\"display_mode\":\"split_pane\",\"worker_launch_mode\":\"interactive\",\"dispatch_mode\":\"hook_preferred_with_fallback\",\"dispatch_ack_timeout_ms\":2000}},\"governance\":{{\"delegation_only\":false,\"plan_approval_required\":false,\"nested_teams_allowed\":false,\"one_team_per_leader_session\":true,\"cleanup_requires_all_workers_inactive\":true}},\"lifecycle_profile\":\"default\",\"permissions_snapshot\":{{\"approval_mode\":{},\"sandbox_mode\":{},\"network_access\":true}},\"tmux_session\":{},\"worker_count\":{},\"workers\":[{}],\"next_task_id\":{},\"created_at\":{},\"leader_cwd\":{},\"team_state_root\":{},\"workspace_mode\":\"single\",\"leader_pane_id\":{},\"hud_pane_id\":null,\"resize_hook_name\":null,\"resize_hook_target\":null,\"next_worker_index\":{}}}
+        "{{\"schema_version\":2,\"name\":{},\"task\":{},\"leader\":{{\"session_id\":{},\"worker_id\":{},\"role\":\"leader\"}},\"policy\":{{\"display_mode\":\"split_pane\",\"worker_launch_mode\":\"interactive\",\"dispatch_mode\":\"hook_preferred_with_fallback\",\"dispatch_ack_timeout_ms\":2000}},\"governance\":{{\"delegation_only\":false,\"plan_approval_required\":false,\"nested_teams_allowed\":false,\"one_team_per_leader_session\":true,\"cleanup_requires_all_workers_inactive\":true}},\"lifecycle_profile\":{},\"permissions_snapshot\":{{\"approval_mode\":{},\"sandbox_mode\":{},\"network_access\":true}},\"tmux_session\":{},\"worker_count\":{},\"workers\":[{}],\"next_task_id\":{},\"created_at\":{},\"leader_cwd\":{},\"team_state_root\":{},\"workspace_mode\":\"single\",\"leader_pane_id\":{},\"hud_pane_id\":null,\"resize_hook_name\":null,\"resize_hook_target\":null,\"next_worker_index\":{}}}
 ",
         json_string(team_name),
         json_string(start_task),
         json_string(&format!("native-runtime-{team_name}")),
         json_string(&leader_worker),
+        json_string(lifecycle_profile),
         json_string(&env::var("CODEX_APPROVAL_MODE").unwrap_or_else(|_| "never".to_string())),
         json_string(&env::var("CODEX_SANDBOX_MODE").unwrap_or_else(|_| "danger-full-access".to_string())),
         json_string(&base_tmux_session),
@@ -497,15 +532,26 @@ fn generate_worker_inbox(
         .tasks
         .iter()
         .enumerate()
+        .filter(|(_, task)| match &task.owner {
+            Some(owner) => owner == worker_name,
+            None => true,
+        })
         .map(|(index, task)| {
-            format!(
+            let mut entry = format!(
                 "- **Task {}**: {}
   Description: {}
   Status: pending",
                 index + 1,
                 task.subject,
                 task.description,
-            )
+            );
+            if !task.blocked_by.is_empty() {
+                entry.push_str(&format!("\n  Blocked by: {}", task.blocked_by.join(", ")));
+            }
+            if let Some(role) = &task.role {
+                entry.push_str(&format!("\n  Role: {role}"));
+            }
+            entry
         })
         .collect::<Vec<_>>()
         .join(
@@ -790,8 +836,28 @@ fn monitor_team(input: &RuntimeRunInput) -> Result<Option<RuntimeMonitorSnapshot
         return Ok(None);
     }
 
-    reclaim_expired_task_claims(&input.team_name, &input.cwd)?;
-    let task_states = list_task_states(&input.team_name, &input.cwd);
+    let previous_snapshot_raw =
+        read_to_string(team_dir.join("monitor-snapshot.json")).unwrap_or_default();
+    let list_tasks_started = Instant::now();
+    let reclaimed_task_ids = reclaim_expired_task_claims(&input.team_name, &input.cwd)?;
+    let mut task_states = list_task_states(&input.team_name, &input.cwd);
+    let list_tasks_ms = list_tasks_started.elapsed().as_millis() as usize;
+    let worker_scan_started = Instant::now();
+    let worker_infos = list_worker_infos(&input.team_name, &input.cwd);
+    let worker_scan_ms = worker_scan_started.elapsed().as_millis() as usize;
+    let rebalance_decisions =
+        build_rebalance_decisions(&task_states, &worker_infos, &reclaimed_task_ids);
+    for decision in &rebalance_decisions {
+        assign_task_owner(
+            &input.team_name,
+            &input.cwd,
+            &decision.task_id,
+            &decision.worker_name,
+        )?;
+    }
+    if !rebalance_decisions.is_empty() {
+        task_states = list_task_states(&input.team_name, &input.cwd);
+    }
     let pending = task_states
         .iter()
         .filter(|task| task.status.as_str() == "pending")
@@ -819,7 +885,6 @@ fn monitor_team(input: &RuntimeRunInput) -> Result<Option<RuntimeMonitorSnapshot
             && !has_structured_verification_evidence(&task.result)
     });
 
-    let worker_infos = list_worker_infos(&input.team_name, &input.cwd);
     let dead_workers = worker_infos
         .iter()
         .filter(|worker| !worker.alive)
@@ -842,6 +907,17 @@ fn monitor_team(input: &RuntimeRunInput) -> Result<Option<RuntimeMonitorSnapshot
         "team-exec".to_string()
     };
 
+    emit_monitor_derived_events(
+        &input.team_name,
+        &task_states,
+        &worker_infos,
+        &previous_snapshot_raw,
+        &input.cwd,
+    )?;
+    let mailbox_delivery_started = Instant::now();
+    let mailbox_notified =
+        deliver_pending_mailbox_messages(&input.team_name, &worker_infos, &input.cwd)?;
+    let mailbox_delivery_ms = mailbox_delivery_started.elapsed().as_millis() as usize;
     let monitor_ms = monitor_started.elapsed().as_millis() as usize;
     let task_statuses = task_states
         .iter()
@@ -856,7 +932,10 @@ fn monitor_team(input: &RuntimeRunInput) -> Result<Option<RuntimeMonitorSnapshot
         &input.cwd,
         &task_statuses,
         &worker_infos,
-        &collect_mailbox_notified_map(&input.team_name, &input.cwd),
+        &mailbox_notified,
+        list_tasks_ms,
+        worker_scan_ms,
+        mailbox_delivery_ms,
         monitor_ms,
     )?;
     sync_root_team_mode_state_on_terminal_phase(&input.team_name, &phase, &input.cwd)?;
@@ -1059,7 +1138,17 @@ fn list_task_states(team_name: &str, cwd: &str) -> Vec<RuntimeTaskStateRecord> {
                 path.file_stem()
                     .map(|stem| stem.to_string_lossy().replace("task-", ""))
             })?;
+            let subject = extract_json_string(&raw, "subject").unwrap_or_default();
+            let description = extract_json_string(&raw, "description").unwrap_or_default();
             let status = extract_json_string(&raw, "status")?;
+            let owner = extract_json_string(&raw, "owner");
+            let role = extract_json_string(&raw, "role");
+            let blocked_by = extract_string_array(&raw, "blocked_by");
+            let depends_on = extract_string_array(&raw, "depends_on");
+            let version = extract_json_number(&raw, "version").unwrap_or(1) as usize;
+            let created_at = extract_json_string(&raw, "created_at").unwrap_or_else(iso_timestamp);
+            let claim_body = extract_json_object_body(&raw, "claim").unwrap_or_default();
+            let claim_leased_until = extract_json_string(&claim_body, "leased_until");
             let requires_code_change =
                 extract_json_bool(&raw, "requires_code_change").unwrap_or(false);
             let result = extract_json_string(&raw, "result")
@@ -1067,7 +1156,16 @@ fn list_task_states(team_name: &str, cwd: &str) -> Vec<RuntimeTaskStateRecord> {
                 .unwrap_or_default();
             Some(RuntimeTaskStateRecord {
                 id,
+                subject,
+                description,
                 status,
+                owner,
+                role,
+                blocked_by,
+                depends_on,
+                version,
+                created_at,
+                claim_leased_until,
                 requires_code_change,
                 result,
             })
@@ -1087,12 +1185,13 @@ fn list_task_statuses(team_name: &str, cwd: &str) -> Vec<RuntimeTaskStatus> {
         .collect()
 }
 
-fn reclaim_expired_task_claims(team_name: &str, cwd: &str) -> Result<(), String> {
+fn reclaim_expired_task_claims(team_name: &str, cwd: &str) -> Result<Vec<String>, String> {
     let tasks_dir = team_dir(team_name, cwd).join("tasks");
     let Ok(entries) = read_dir(tasks_dir) else {
-        return Ok(());
+        return Ok(Vec::new());
     };
 
+    let mut reclaimed = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
         let Ok(raw) = read_to_string(&path) else {
@@ -1121,22 +1220,44 @@ fn reclaim_expired_task_claims(team_name: &str, cwd: &str) -> Result<(), String>
         let subject = extract_json_string(&raw, "subject").unwrap_or_default();
         let description = extract_json_string(&raw, "description").unwrap_or_default();
         let created_at = extract_json_string(&raw, "created_at").unwrap_or_else(iso_timestamp);
+        let blocked_by = extract_string_array(&raw, "blocked_by");
+        let depends_on = extract_string_array(&raw, "depends_on");
+        let role = extract_json_string(&raw, "role");
+        let requires_code_change = extract_json_bool(&raw, "requires_code_change").unwrap_or(false);
+        let result = extract_json_string(&raw, "result");
+        let summary = extract_json_string(&raw, "summary");
 
         write(
             &path,
             format!(
-                "{{\"id\":{},\"subject\":{},\"description\":{},\"status\":\"pending\",\"depends_on\":[],\"version\":{},\"created_at\":{}}}\n",
+                "{{\"id\":{},\"subject\":{},\"description\":{},\"status\":\"pending\",\"depends_on\":{},\"blocked_by\":{},\"version\":{},\"created_at\":{},\"owner\":{},\"role\":{},\"requires_code_change\":{},\"result\":{},\"summary\":{}}}\n",
                 json_string(&id),
                 json_string(&subject),
                 json_string(&description),
+                json_string_array(&depends_on),
+                json_string_array(&blocked_by),
                 version,
                 json_string(&created_at),
+                "null",
+                role.as_deref()
+                    .map(json_string)
+                    .unwrap_or_else(|| "null".to_string()),
+                if requires_code_change { "true" } else { "false" },
+                result
+                    .as_deref()
+                    .map(json_string)
+                    .unwrap_or_else(|| "null".to_string()),
+                summary
+                    .as_deref()
+                    .map(json_string)
+                    .unwrap_or_else(|| "null".to_string()),
             ),
         )
         .map_err(|err| format!("failed reclaiming expired task claim: {err}"))?;
+        reclaimed.push(id);
     }
 
-    Ok(())
+    Ok(reclaimed)
 }
 
 fn iso_timestamp_is_expired(value: &str) -> bool {
@@ -1226,6 +1347,9 @@ fn write_monitor_snapshot(
     task_statuses: &[RuntimeTaskStatus],
     worker_infos: &[WorkerMonitorInfo],
     mailbox_notified: &str,
+    list_tasks_ms: usize,
+    worker_scan_ms: usize,
+    mailbox_delivery_ms: usize,
     monitor_ms: usize,
 ) -> Result<(), String> {
     let previous_snapshot_raw =
@@ -1284,7 +1408,7 @@ fn write_monitor_snapshot(
         .join(",");
     let updated_at = iso_timestamp();
     let snapshot = format!(
-        "{{\"taskStatusById\":{{{}}},\"workerAliveByName\":{{{}}},\"workerStateByName\":{{{}}},\"workerTurnCountByName\":{{{}}},\"workerTaskIdByName\":{{{}}},\"mailboxNotifiedByMessageId\":{{{}}},\"completedEventTaskIds\":{{{}}},\"monitorTimings\":{{\"list_tasks_ms\":{},\"worker_scan_ms\":{},\"mailbox_delivery_ms\":0,\"total_ms\":{},\"updated_at\":{}}}}}\n",
+        "{{\"taskStatusById\":{{{}}},\"workerAliveByName\":{{{}}},\"workerStateByName\":{{{}}},\"workerTurnCountByName\":{{{}}},\"workerTaskIdByName\":{{{}}},\"mailboxNotifiedByMessageId\":{{{}}},\"completedEventTaskIds\":{{{}}},\"monitorTimings\":{{\"list_tasks_ms\":{},\"worker_scan_ms\":{},\"mailbox_delivery_ms\":{},\"total_ms\":{},\"updated_at\":{}}}}}\n",
         task_status_by_id,
         worker_alive_by_name,
         worker_state_by_name,
@@ -1292,8 +1416,9 @@ fn write_monitor_snapshot(
         worker_task_id_by_name,
         merged_mailbox_notified,
         previous_completed_event_task_ids,
-        monitor_ms,
-        monitor_ms,
+        list_tasks_ms,
+        worker_scan_ms,
+        mailbox_delivery_ms,
         monitor_ms,
         json_string(&updated_at),
     );
@@ -1335,6 +1460,301 @@ fn collect_mailbox_notified_map(team_name: &str, cwd: &str) -> String {
         }
     }
     notified.join(",")
+}
+
+fn task_dependencies_completed(
+    task: &RuntimeTaskStateRecord,
+    task_states: &[RuntimeTaskStateRecord],
+) -> bool {
+    let dependency_ids = if !task.depends_on.is_empty() {
+        &task.depends_on
+    } else {
+        &task.blocked_by
+    };
+    if dependency_ids.is_empty() {
+        return true;
+    }
+    dependency_ids.iter().all(|dependency_id| {
+        task_states
+            .iter()
+            .find(|candidate| candidate.id == *dependency_id)
+            .map(|candidate| candidate.status == "completed")
+            .unwrap_or(false)
+    })
+}
+
+fn is_worker_available(worker: &WorkerMonitorInfo) -> bool {
+    worker.alive && (worker.state == "idle" || worker.state == "done" || worker.state == "unknown")
+}
+
+fn build_rebalance_decisions(
+    task_states: &[RuntimeTaskStateRecord],
+    worker_infos: &[WorkerMonitorInfo],
+    reclaimed_task_ids: &[String],
+) -> Vec<RebalanceDecision> {
+    let available_workers = worker_infos
+        .iter()
+        .filter(|worker| is_worker_available(worker))
+        .collect::<Vec<_>>();
+    if available_workers.is_empty() {
+        return Vec::new();
+    }
+
+    let mut current_assignments = task_states
+        .iter()
+        .filter(|task| task.status == "in_progress")
+        .filter_map(|task| task.owner.clone())
+        .collect::<Vec<_>>();
+    let mut pending_tasks = task_states
+        .iter()
+        .filter(|task| task.status == "pending")
+        .filter(|task| task.owner.as_deref().unwrap_or("").is_empty())
+        .filter(|task| task_dependencies_completed(task, task_states))
+        .collect::<Vec<_>>();
+    pending_tasks.sort_by(|left, right| {
+        let left_reclaimed = if reclaimed_task_ids.iter().any(|id| id == &left.id) {
+            0
+        } else {
+            1
+        };
+        let right_reclaimed = if reclaimed_task_ids.iter().any(|id| id == &right.id) {
+            0
+        } else {
+            1
+        };
+        left_reclaimed
+            .cmp(&right_reclaimed)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
+    let mut decisions = Vec::new();
+    for task in pending_tasks {
+        let selected = available_workers
+            .iter()
+            .map(|worker| {
+                let assigned_count = current_assignments
+                    .iter()
+                    .filter(|owner| owner.as_str() == worker.name)
+                    .count();
+                (worker, assigned_count)
+            })
+            .min_by_key(|(_, assigned_count)| *assigned_count)
+            .map(|(worker, _)| worker);
+        let Some(selected) = selected else {
+            continue;
+        };
+        current_assignments.push(selected.name.clone());
+        decisions.push(RebalanceDecision {
+            task_id: task.id.clone(),
+            worker_name: selected.name.clone(),
+            reason: if reclaimed_task_ids.iter().any(|id| id == &task.id) {
+                "reclaimed work is ready; balances current load".to_string()
+            } else {
+                "idle worker pickup; balances current load".to_string()
+            },
+        });
+    }
+    decisions
+}
+
+fn assign_task_owner(
+    team_name: &str,
+    cwd: &str,
+    task_id: &str,
+    worker_name: &str,
+) -> Result<(), String> {
+    let path = team_dir(team_name, cwd)
+        .join("tasks")
+        .join(format!("task-{task_id}.json"));
+    let raw = read_to_string(&path)
+        .map_err(|err| format!("failed reading task for assignment: {err}"))?;
+    let id = extract_json_string(&raw, "id").unwrap_or_else(|| task_id.to_string());
+    let subject = extract_json_string(&raw, "subject").unwrap_or_default();
+    let description = extract_json_string(&raw, "description").unwrap_or_default();
+    let status = extract_json_string(&raw, "status").unwrap_or_else(|| "pending".to_string());
+    let blocked_by = extract_string_array(&raw, "blocked_by");
+    let depends_on = extract_string_array(&raw, "depends_on");
+    let version = extract_json_number(&raw, "version").unwrap_or(1) + 1;
+    let created_at = extract_json_string(&raw, "created_at").unwrap_or_else(iso_timestamp);
+    let role = extract_json_string(&raw, "role");
+    let requires_code_change = extract_json_bool(&raw, "requires_code_change").unwrap_or(false);
+    let result = extract_json_string(&raw, "result");
+    let summary = extract_json_string(&raw, "summary");
+
+    write(
+        path,
+        format!(
+            "{{\"id\":{},\"subject\":{},\"description\":{},\"status\":{},\"depends_on\":{},\"blocked_by\":{},\"version\":{},\"created_at\":{},\"owner\":{},\"role\":{},\"requires_code_change\":{},\"result\":{},\"summary\":{}}}\n",
+            json_string(&id),
+            json_string(&subject),
+            json_string(&description),
+            json_string(&status),
+            json_string_array(&depends_on),
+            json_string_array(&blocked_by),
+            version,
+            json_string(&created_at),
+            json_string(worker_name),
+            role.as_deref()
+                .map(json_string)
+                .unwrap_or_else(|| "null".to_string()),
+            if requires_code_change { "true" } else { "false" },
+            result
+                .as_deref()
+                .map(json_string)
+                .unwrap_or_else(|| "null".to_string()),
+            summary
+                .as_deref()
+                .map(json_string)
+                .unwrap_or_else(|| "null".to_string()),
+        ),
+    )
+    .map_err(|err| format!("failed assigning task owner: {err}"))
+}
+
+fn emit_monitor_derived_events(
+    team_name: &str,
+    task_states: &[RuntimeTaskStateRecord],
+    worker_infos: &[WorkerMonitorInfo],
+    previous_snapshot_raw: &str,
+    cwd: &str,
+) -> Result<(), String> {
+    for task in task_states {
+        let prev_status = extract_json_string(
+            &extract_json_object_body(previous_snapshot_raw, "taskStatusById").unwrap_or_default(),
+            &task.id,
+        );
+        if matches!(prev_status.as_deref(), Some(prev) if prev != "completed")
+            && task.status == "completed"
+        {
+            let completed_event_ids =
+                extract_json_object_body(previous_snapshot_raw, "completedEventTaskIds")
+                    .unwrap_or_default();
+            let already_emitted =
+                extract_json_bool(&completed_event_ids, &task.id).unwrap_or(false);
+            if !already_emitted {
+                append_team_event(
+                    team_name,
+                    cwd,
+                    "task_completed",
+                    task.owner.as_deref().unwrap_or("unknown"),
+                    &format!("task_id={}", task.id),
+                )?;
+            }
+        }
+    }
+
+    let previous_alive =
+        extract_json_object_body(previous_snapshot_raw, "workerAliveByName").unwrap_or_default();
+    let previous_state =
+        extract_json_object_body(previous_snapshot_raw, "workerStateByName").unwrap_or_default();
+    for worker in worker_infos {
+        let prev_alive = extract_json_bool(&previous_alive, &worker.name);
+        if matches!(prev_alive, Some(true)) && !worker.alive {
+            append_team_event(team_name, cwd, "worker_stopped", &worker.name, "")?;
+        }
+
+        let prev_state = extract_json_string(&previous_state, &worker.name);
+        if let Some(prev_state_value) = prev_state.as_deref() {
+            if prev_state_value != worker.state {
+                append_team_event(
+                    team_name,
+                    cwd,
+                    "worker_state_changed",
+                    &worker.name,
+                    &format!("state={} prev_state={}", worker.state, prev_state_value),
+                )?;
+            }
+            if prev_state_value != "idle" && worker.state == "idle" {
+                append_team_event(team_name, cwd, "worker_idle", &worker.name, "state=idle")?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn deliver_pending_mailbox_messages(
+    team_name: &str,
+    worker_infos: &[WorkerMonitorInfo],
+    cwd: &str,
+) -> Result<String, String> {
+    let mailbox_dir = team_dir(team_name, cwd).join("mailbox");
+    let Ok(entries) = read_dir(&mailbox_dir) else {
+        return Ok(String::new());
+    };
+
+    let previous_notified = collect_mailbox_notified_map(team_name, cwd);
+    let mut next_notifications = Vec::new();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let worker_name = path
+            .file_stem()
+            .map(|value| value.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if worker_name.is_empty() {
+            continue;
+        }
+        let worker_alive = worker_infos
+            .iter()
+            .find(|worker| worker.name == worker_name)
+            .map(|worker| worker.alive)
+            .unwrap_or(false);
+        let raw = read_to_string(&path).unwrap_or_default();
+        let mut rewritten_messages = Vec::new();
+        let mut changed = false;
+        for message_body in extract_json_array_entries_for_key(&raw, "messages") {
+            let message_id = extract_json_string(message_body, "message_id").unwrap_or_default();
+            let from_worker = extract_json_string(message_body, "from_worker").unwrap_or_default();
+            let to_worker = extract_json_string(message_body, "to_worker").unwrap_or_default();
+            let body = extract_json_string(message_body, "body").unwrap_or_default();
+            let created_at =
+                extract_json_string(message_body, "created_at").unwrap_or_else(iso_timestamp);
+            let delivered_at = extract_json_string(message_body, "delivered_at");
+            let mut notified_at = extract_json_string(message_body, "notified_at");
+            let was_notified = !notified_at.clone().unwrap_or_default().is_empty()
+                || extract_json_string(&previous_notified, &message_id).is_some();
+            if delivered_at.is_none() && !was_notified && worker_alive {
+                notified_at = Some(iso_timestamp());
+                changed = true;
+            }
+            if let Some(ts) = notified_at.as_deref() {
+                next_notifications.push(format!(
+                    "{}:{}",
+                    json_string(&message_id),
+                    json_string(ts)
+                ));
+            }
+            rewritten_messages.push(format!(
+                "{{\"message_id\":{},\"from_worker\":{},\"to_worker\":{},\"body\":{},\"created_at\":{},\"notified_at\":{},\"delivered_at\":{}}}",
+                json_string(&message_id),
+                json_string(&from_worker),
+                json_string(&to_worker),
+                json_string(&body),
+                json_string(&created_at),
+                notified_at
+                    .as_deref()
+                    .map(json_string)
+                    .unwrap_or_else(|| "null".to_string()),
+                delivered_at
+                    .as_deref()
+                    .map(json_string)
+                    .unwrap_or_else(|| "null".to_string()),
+            ));
+        }
+        if changed {
+            write(
+                &path,
+                format!(
+                    "{{\"worker\":{},\"messages\":[{}]}}\n",
+                    json_string(&worker_name),
+                    rewritten_messages.join(",")
+                ),
+            )
+            .map_err(|err| format!("failed writing mailbox delivery state: {err}"))?;
+        }
+    }
+
+    Ok(next_notifications.join(","))
 }
 
 fn merge_json_object_entries(previous: &str, current: &str) -> String {
@@ -1883,6 +2303,24 @@ fn read_linked_ralph_profile(team_name: &str, cwd: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn resolve_lifecycle_profile(team_name: &str, cwd: &str) -> &'static str {
+    let state_path = mode_state_path(cwd, "team");
+    let Ok(raw) = read_to_string(state_path) else {
+        return "default";
+    };
+
+    let state_team_name = extract_json_string(&raw, "team_name").unwrap_or_default();
+    if !state_team_name.trim().is_empty() && state_team_name != team_name {
+        return "default";
+    }
+
+    if extract_json_bool(&raw, "linked_ralph").unwrap_or(false) {
+        "linked_ralph"
+    } else {
+        "default"
+    }
+}
+
 fn collect_task_results(input: &RuntimeRunInput) -> Vec<TaskResult> {
     let tasks_dir = PathBuf::from(&input.cwd)
         .join(".omx")
@@ -2195,6 +2633,9 @@ fn extract_tasks(raw: &str) -> Vec<RuntimeTaskInput> {
             tasks.push(RuntimeTaskInput {
                 subject,
                 description,
+                owner: extract_json_string(normalized, "owner"),
+                blocked_by: extract_string_array(normalized, "blocked_by"),
+                role: extract_json_string(normalized, "role"),
             });
         }
     }
@@ -2319,9 +2760,10 @@ fn slice_object_body(value_start: &str) -> Option<&str> {
 mod tests {
     use super::{
         collect_task_results, detect_dead_worker_failure, extract_json_bool, extract_string_array,
-        has_structured_verification_evidence, monitor_team, parse_runtime_input,
-        read_linked_ralph_profile, shutdown_team, split_json_array_entries,
-        write_panes_sidecar_placeholder, write_phase_state, RuntimeRunInput, RuntimeTaskInput,
+        finalize_team_state, has_structured_verification_evidence, initialize_team_state,
+        monitor_team, parse_runtime_input, read_linked_ralph_profile, resolve_lifecycle_profile,
+        shutdown_team, split_json_array_entries, write_panes_sidecar_placeholder,
+        write_phase_state, RuntimeRunInput, RuntimeTaskInput, TeamSessionStart, WorkerCli,
     };
     use crate::test_support::env_lock;
     use std::env;
@@ -2338,6 +2780,9 @@ mod tests {
         assert_eq!(parsed.team_name, "alpha");
         assert_eq!(parsed.agent_types, vec!["codex".to_string()]);
         assert_eq!(parsed.tasks.len(), 1);
+        assert_eq!(parsed.tasks[0].owner, None);
+        assert!(parsed.tasks[0].blocked_by.is_empty());
+        assert_eq!(parsed.tasks[0].role, None);
         assert_eq!(parsed.cwd, "/tmp/repo");
         assert_eq!(parsed.worker_count, 1);
         assert_eq!(parsed.poll_interval_ms, 5_000);
@@ -2360,6 +2805,23 @@ mod tests {
         .expect("expected parse");
         assert_eq!(parsed.tasks.len(), 2);
         assert_eq!(parsed.tasks[0].description, "desc, with comma");
+    }
+
+    #[test]
+    fn parses_extended_runtime_run_task_metadata() {
+        let parsed = parse_runtime_input(
+            r#"{"teamName":"alpha","agentTypes":["codex"],"tasks":[{"subject":"one","description":"desc","owner":"worker-1","blocked_by":["2","3"],"role":"executor"}],"cwd":"/tmp/repo","workerCount":3,"pollIntervalMs":1500}"#,
+        )
+        .expect("expected runtime-run input to parse");
+
+        assert_eq!(parsed.worker_count, 3);
+        assert_eq!(parsed.poll_interval_ms, 1_500);
+        assert_eq!(parsed.tasks[0].owner.as_deref(), Some("worker-1"));
+        assert_eq!(
+            parsed.tasks[0].blocked_by,
+            vec!["2".to_string(), "3".to_string()]
+        );
+        assert_eq!(parsed.tasks[0].role.as_deref(), Some("executor"));
     }
 
     #[test]
@@ -2402,6 +2864,210 @@ mod tests {
     }
 
     #[test]
+    fn resolves_linked_ralph_lifecycle_profile_from_root_team_state() {
+        let temp =
+            std::env::temp_dir().join(format!("omx-runtime-run-lifecycle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp);
+        let state_dir = temp.join(".omx").join("state");
+        create_dir_all(&state_dir).expect("expected state dir");
+        write(
+            state_dir.join("team-state.json"),
+            r#"{"active":true,"linked_ralph":true,"team_name":"alpha"}"#,
+        )
+        .expect("expected team state");
+
+        assert_eq!(
+            resolve_lifecycle_profile("alpha", temp.to_string_lossy().as_ref()),
+            "linked_ralph"
+        );
+        assert_eq!(
+            resolve_lifecycle_profile("beta", temp.to_string_lossy().as_ref()),
+            "default"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn startup_state_writes_linked_ralph_lifecycle_profile_into_config_and_manifest() {
+        let temp = std::env::temp_dir().join(format!(
+            "omx-runtime-run-startup-lifecycle-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&temp);
+        let state_dir = temp.join(".omx").join("state");
+        create_dir_all(&state_dir).expect("expected state dir");
+        write(
+            state_dir.join("team-state.json"),
+            r#"{"active":true,"linked_ralph":true,"team_name":"alpha"}"#,
+        )
+        .expect("expected team state");
+
+        let input = RuntimeRunInput {
+            team_name: "alpha".into(),
+            agent_types: vec!["codex".into()],
+            tasks: vec![RuntimeTaskInput {
+                subject: "one".into(),
+                description: "desc".into(),
+                owner: None,
+                blocked_by: Vec::new(),
+                role: None,
+            }],
+            cwd: temp.to_string_lossy().into_owned(),
+            worker_count: 1,
+            poll_interval_ms: 10,
+        };
+        let created_at = "2026-03-14T00:00:00.000Z";
+        let team_state_root = temp.join(".omx").join("state");
+
+        initialize_team_state(
+            "alpha",
+            "one",
+            &input,
+            &[WorkerCli::Codex],
+            &team_state_root,
+            created_at,
+        )
+        .expect("expected initial team state");
+
+        let initial_config = read_to_string(
+            team_state_root
+                .join("team")
+                .join("alpha")
+                .join("config.json"),
+        )
+        .expect("expected initial config");
+        let initial_manifest = read_to_string(
+            team_state_root
+                .join("team")
+                .join("alpha")
+                .join("manifest.v2.json"),
+        )
+        .expect("expected initial manifest");
+        assert!(initial_config.contains("\"lifecycle_profile\":\"linked_ralph\""));
+        assert!(initial_manifest.contains("\"lifecycle_profile\":\"linked_ralph\""));
+
+        finalize_team_state(
+            "alpha",
+            "one",
+            &input,
+            &[WorkerCli::Codex],
+            &team_state_root,
+            created_at,
+            &TeamSessionStart {
+                team_target: "omx-team-alpha:1".into(),
+                leader_pane_id: "%1".into(),
+                worker_pane_ids: vec!["%2".into()],
+            },
+        )
+        .expect("expected finalized team state");
+
+        let final_config = read_to_string(
+            team_state_root
+                .join("team")
+                .join("alpha")
+                .join("config.json"),
+        )
+        .expect("expected final config");
+        let final_manifest = read_to_string(
+            team_state_root
+                .join("team")
+                .join("alpha")
+                .join("manifest.v2.json"),
+        )
+        .expect("expected final manifest");
+        assert!(final_config.contains("\"lifecycle_profile\":\"linked_ralph\""));
+        assert!(final_manifest.contains("\"lifecycle_profile\":\"linked_ralph\""));
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn initialize_team_state_preserves_task_metadata_and_worker_inbox_assignment() {
+        let temp = std::env::temp_dir().join(format!(
+            "omx-runtime-run-task-metadata-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&temp);
+        let team_state_root = temp.join(".omx").join("state");
+
+        let input = RuntimeRunInput {
+            team_name: "alpha".into(),
+            agent_types: vec!["codex".into(), "codex".into()],
+            tasks: vec![
+                RuntimeTaskInput {
+                    subject: "owned task".into(),
+                    description: "desc".into(),
+                    owner: Some("worker-1".into()),
+                    blocked_by: vec!["2".into()],
+                    role: Some("executor".into()),
+                },
+                RuntimeTaskInput {
+                    subject: "shared task".into(),
+                    description: "shared".into(),
+                    owner: None,
+                    blocked_by: Vec::new(),
+                    role: None,
+                },
+            ],
+            cwd: temp.to_string_lossy().into_owned(),
+            worker_count: 2,
+            poll_interval_ms: 10,
+        };
+
+        initialize_team_state(
+            "alpha",
+            "owned task; shared task",
+            &input,
+            &[WorkerCli::Codex, WorkerCli::Codex],
+            &team_state_root,
+            "2026-03-14T00:00:00.000Z",
+        )
+        .expect("expected initial team state");
+
+        let task_one = read_to_string(
+            team_state_root
+                .join("team")
+                .join("alpha")
+                .join("tasks")
+                .join("task-1.json"),
+        )
+        .expect("task one");
+        assert!(task_one.contains("\"owner\":\"worker-1\""));
+        assert!(task_one.contains("\"role\":\"executor\""));
+        assert!(task_one.contains("\"blocked_by\":[\"2\"]"));
+        assert!(task_one.contains("\"depends_on\":[\"2\"]"));
+
+        let worker_one_inbox = read_to_string(
+            team_state_root
+                .join("team")
+                .join("alpha")
+                .join("workers")
+                .join("worker-1")
+                .join("inbox.md"),
+        )
+        .expect("worker one inbox");
+        assert!(worker_one_inbox.contains("owned task"));
+        assert!(worker_one_inbox.contains("Blocked by: 2"));
+        assert!(worker_one_inbox.contains("Role: executor"));
+        assert!(worker_one_inbox.contains("shared task"));
+
+        let worker_two_inbox = read_to_string(
+            team_state_root
+                .join("team")
+                .join("alpha")
+                .join("workers")
+                .join("worker-2")
+                .join("inbox.md"),
+        )
+        .expect("worker two inbox");
+        assert!(!worker_two_inbox.contains("owned task"));
+        assert!(worker_two_inbox.contains("shared task"));
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
     fn collects_task_results_from_state_files() {
         let temp =
             std::env::temp_dir().join(format!("omx-runtime-run-tasks-{}", std::process::id()));
@@ -2425,6 +3091,9 @@ mod tests {
             tasks: vec![RuntimeTaskInput {
                 subject: "one".into(),
                 description: "desc".into(),
+                owner: None,
+                blocked_by: Vec::new(),
+                role: None,
             }],
             cwd: temp.to_string_lossy().into_owned(),
             worker_count: 1,
@@ -2508,6 +3177,9 @@ mod tests {
             tasks: vec![RuntimeTaskInput {
                 subject: "one".into(),
                 description: "desc".into(),
+                owner: None,
+                blocked_by: Vec::new(),
+                role: None,
             }],
             cwd: temp.to_string_lossy().into_owned(),
             worker_count: 1,
@@ -2529,6 +3201,9 @@ mod tests {
             tasks: vec![RuntimeTaskInput {
                 subject: "one".into(),
                 description: "desc".into(),
+                owner: None,
+                blocked_by: Vec::new(),
+                role: None,
             }],
             cwd: temp.to_string_lossy().into_owned(),
             worker_count: 1,
@@ -2582,6 +3257,9 @@ mod tests {
             tasks: vec![RuntimeTaskInput {
                 subject: "one".into(),
                 description: "desc".into(),
+                owner: None,
+                blocked_by: Vec::new(),
+                role: None,
             }],
             cwd: temp.to_string_lossy().into_owned(),
             worker_count: 1,
@@ -2671,6 +3349,9 @@ mod tests {
             tasks: vec![RuntimeTaskInput {
                 subject: "one".into(),
                 description: "desc".into(),
+                owner: None,
+                blocked_by: Vec::new(),
+                role: None,
             }],
             cwd: temp.to_string_lossy().into_owned(),
             worker_count: 1,
@@ -2723,6 +3404,9 @@ mod tests {
             tasks: vec![RuntimeTaskInput {
                 subject: "one".into(),
                 description: "desc".into(),
+                owner: None,
+                blocked_by: Vec::new(),
+                role: None,
             }],
             cwd: temp.to_string_lossy().into_owned(),
             worker_count: 1,
@@ -2749,6 +3433,191 @@ mod tests {
         assert!(ralph_state.contains("\"linked_team_terminal_phase\":\"complete\""));
         assert!(ralph_state.contains("\"linked_team_terminal_at\":\""));
         assert!(ralph_state.contains("\"completed_at\":\""));
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn monitor_team_reclaims_expired_claim_and_rebalances_ready_work() {
+        let temp = std::env::temp_dir().join(format!(
+            "omx-runtime-monitor-reclaim-rebalance-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&temp);
+
+        let team_dir = temp.join(".omx").join("state").join("team").join("alpha");
+        let tasks_dir = team_dir.join("tasks");
+        let worker_dir = team_dir.join("workers").join("worker-1");
+        create_dir_all(&tasks_dir).expect("expected task dir");
+        create_dir_all(&worker_dir).expect("expected worker dir");
+
+        write(
+            tasks_dir.join("task-1.json"),
+            r#"{"id":"1","subject":"one","description":"desc","status":"in_progress","version":2,"created_at":"2026-03-14T00:00:00Z","owner":"worker-old","claim":{"leased_until":"1970-01-01T00:00:00Z"}}"#,
+        )
+        .expect("expected task file");
+        write(
+            worker_dir.join("identity.json"),
+            format!(r#"{{"pid":{}}}"#, std::process::id()),
+        )
+        .expect("expected identity file");
+        write(
+            worker_dir.join("status.json"),
+            r#"{"state":"idle","updated_at":"2026-03-14T00:00:00Z"}"#,
+        )
+        .expect("expected status file");
+        write(
+            worker_dir.join("heartbeat.json"),
+            format!(
+                r#"{{"pid":{},"last_turn_at":"2026-03-14T00:00:00Z","turn_count":1,"alive":true}}"#,
+                std::process::id()
+            ),
+        )
+        .expect("expected heartbeat file");
+
+        let _snapshot = monitor_team(&RuntimeRunInput {
+            team_name: "alpha".into(),
+            agent_types: vec!["codex".into()],
+            tasks: vec![RuntimeTaskInput {
+                subject: "one".into(),
+                description: "desc".into(),
+                owner: None,
+                blocked_by: Vec::new(),
+                role: None,
+            }],
+            cwd: temp.to_string_lossy().into_owned(),
+            worker_count: 1,
+            poll_interval_ms: 10,
+        })
+        .expect("expected monitor ok")
+        .expect("expected snapshot");
+
+        let task = read_to_string(tasks_dir.join("task-1.json")).expect("expected task reread");
+        assert!(task.contains("\"status\":\"pending\""));
+        assert!(task.contains("\"owner\":\"worker-1\""));
+        assert!(!task.contains("\"leased_until\""));
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn monitor_team_marks_alive_worker_mailbox_messages_notified() {
+        let temp = std::env::temp_dir().join(format!(
+            "omx-runtime-monitor-mailbox-notify-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&temp);
+
+        let team_dir = temp.join(".omx").join("state").join("team").join("alpha");
+        let tasks_dir = team_dir.join("tasks");
+        let worker_dir = team_dir.join("workers").join("worker-1");
+        let mailbox_dir = team_dir.join("mailbox");
+        create_dir_all(&tasks_dir).expect("expected task dir");
+        create_dir_all(&worker_dir).expect("expected worker dir");
+        create_dir_all(&mailbox_dir).expect("expected mailbox dir");
+
+        write(
+            tasks_dir.join("task-1.json"),
+            r#"{"id":"1","status":"pending"}"#,
+        )
+        .expect("expected task file");
+        write(
+            worker_dir.join("identity.json"),
+            format!(r#"{{"pid":{}}}"#, std::process::id()),
+        )
+        .expect("expected identity file");
+        write(
+            worker_dir.join("status.json"),
+            r#"{"state":"idle","updated_at":"2026-03-14T00:00:00Z"}"#,
+        )
+        .expect("expected status file");
+        write(
+            mailbox_dir.join("worker-1.json"),
+            r#"{"worker":"worker-1","messages":[{"message_id":"msg-1","from_worker":"leader-fixed","to_worker":"worker-1","body":"hello","created_at":"2026-03-14T00:00:00Z","notified_at":null,"delivered_at":null}]}"#,
+        )
+        .expect("expected mailbox");
+
+        let _snapshot = monitor_team(&RuntimeRunInput {
+            team_name: "alpha".into(),
+            agent_types: vec!["codex".into()],
+            tasks: vec![RuntimeTaskInput {
+                subject: "one".into(),
+                description: "desc".into(),
+                owner: None,
+                blocked_by: Vec::new(),
+                role: None,
+            }],
+            cwd: temp.to_string_lossy().into_owned(),
+            worker_count: 1,
+            poll_interval_ms: 10,
+        })
+        .expect("expected monitor ok")
+        .expect("expected snapshot");
+
+        let mailbox =
+            read_to_string(mailbox_dir.join("worker-1.json")).expect("expected mailbox reread");
+        assert!(mailbox.contains("\"message_id\":\"msg-1\""));
+        assert!(mailbox.contains("\"notified_at\":\""));
+
+        let snapshot = read_to_string(team_dir.join("monitor-snapshot.json"))
+            .expect("expected snapshot reread");
+        assert!(snapshot.contains("\"mailboxNotifiedByMessageId\":{\"msg-1\":\""));
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn monitor_team_emits_monitor_derived_events() {
+        let temp =
+            std::env::temp_dir().join(format!("omx-runtime-monitor-events-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp);
+
+        let team_dir = temp.join(".omx").join("state").join("team").join("alpha");
+        let tasks_dir = team_dir.join("tasks");
+        let worker_dir = team_dir.join("workers").join("worker-1");
+        create_dir_all(&tasks_dir).expect("expected task dir");
+        create_dir_all(&worker_dir).expect("expected worker dir");
+        write(
+            team_dir.join("monitor-snapshot.json"),
+            r#"{"taskStatusById":{"1":"in_progress"},"workerAliveByName":{"worker-1":true},"workerStateByName":{"worker-1":"working"},"workerTurnCountByName":{"worker-1":1},"workerTaskIdByName":{"worker-1":"1"},"mailboxNotifiedByMessageId":{},"completedEventTaskIds":{},"monitorTimings":{"list_tasks_ms":1,"worker_scan_ms":1,"mailbox_delivery_ms":1,"total_ms":1,"updated_at":"2026-03-14T00:00:00Z"}}"#,
+        )
+        .expect("expected prior snapshot");
+        write(
+            tasks_dir.join("task-1.json"),
+            r#"{"id":"1","status":"completed","owner":"worker-1"}"#,
+        )
+        .expect("expected task file");
+        write(worker_dir.join("identity.json"), r#"{"pid":999999999}"#)
+            .expect("expected identity file");
+        write(
+            worker_dir.join("status.json"),
+            r#"{"state":"idle","updated_at":"2026-03-14T00:00:00Z"}"#,
+        )
+        .expect("expected status file");
+
+        let _snapshot = monitor_team(&RuntimeRunInput {
+            team_name: "alpha".into(),
+            agent_types: vec!["codex".into()],
+            tasks: vec![RuntimeTaskInput {
+                subject: "one".into(),
+                description: "desc".into(),
+                owner: None,
+                blocked_by: Vec::new(),
+                role: None,
+            }],
+            cwd: temp.to_string_lossy().into_owned(),
+            worker_count: 1,
+            poll_interval_ms: 10,
+        })
+        .expect("expected monitor ok")
+        .expect("expected snapshot");
+
+        let events =
+            read_to_string(team_dir.join("events").join("events.ndjson")).expect("expected events");
+        assert!(events.contains("\"type\":\"task_completed\""));
+        assert!(events.contains("\"type\":\"worker_stopped\""));
+        assert!(events.contains("\"type\":\"worker_state_changed\""));
+        assert!(events.contains("\"type\":\"worker_idle\""));
 
         let _ = std::fs::remove_dir_all(&temp);
     }
