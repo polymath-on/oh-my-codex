@@ -913,7 +913,7 @@ process.on('SIGTERM', () => process.exit(0));
       const worker2Joined = worker2Args!.join(' ');
       assert.match(worker1Joined, /model_reasoning_effort="medium"/);
       assert.match(worker1Joined, /model_instructions_file=.*worker-1\/AGENTS\.md/);
-      assert.match(worker2Joined, /model_reasoning_effort="low"/);
+      assert.match(worker2Joined, /model_reasoning_effort="high"/);
       assert.match(worker2Joined, /model_instructions_file=.*worker-2\/AGENTS\.md/);
 
       await shutdownTeam(runtime.teamName, cwd, { force: true });
