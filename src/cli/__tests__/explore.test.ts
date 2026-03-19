@@ -30,7 +30,7 @@ function runOmx(
 ): { status: number | null; stdout: string; stderr: string; error?: string } {
   const testDir = dirname(fileURLToPath(import.meta.url));
   const repoRoot = join(testDir, '..', '..', '..');
-  const omxBin = join(repoRoot, 'bin', 'omx.js');
+  const omxBin = join(repoRoot, 'dist', 'cli', 'omx.js');
   const nodeWrapper = join(cwd, '.omx-test-node.sh');
   if (!existsSync(nodeWrapper)) {
     writeFileSync(nodeWrapper, '#!/bin/sh\nexec node "$@"\n');

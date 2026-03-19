@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 function runOmx(cwd: string, argv: string[]) {
   const testDir = dirname(fileURLToPath(import.meta.url));
   const repoRoot = join(testDir, '..', '..', '..');
-  const omxBin = join(repoRoot, 'bin', 'omx.js');
+  const omxBin = join(repoRoot, 'dist', 'cli', 'omx.js');
   return spawnSync(process.execPath, [omxBin, ...argv], {
     cwd,
     encoding: 'utf-8',

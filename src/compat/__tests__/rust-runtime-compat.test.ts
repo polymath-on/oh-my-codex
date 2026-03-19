@@ -17,7 +17,7 @@ function runOmx(
   argv: string[],
   envOverrides: Record<string, string> = {},
 ): { status: number | null; stdout: string; stderr: string; error?: string } {
-  const omxBin = join(repoRoot(), 'bin', 'omx.js');
+  const omxBin = join(repoRoot(), 'dist', 'cli', 'omx.js');
   const result = spawnSync(process.execPath, [omxBin, ...argv], {
     cwd,
     encoding: 'utf-8',

@@ -31,16 +31,16 @@ describe('sparkshell packaging scaffold', () => {
     const packagedBinaryPath = join(stagedRoot, packagedBinaryRelativePath);
 
     assert.deepEqual(pkg.bin, { omx: 'dist/cli/omx.js' });
-    assert.equal(pkg.scripts?.['build:sparkshell'], 'node scripts/build-sparkshell.mjs');
-    assert.equal(pkg.scripts?.['test:sparkshell'], 'node scripts/test-sparkshell.mjs');
-    assert.equal(pkg.files?.includes('dist/cli/omx.js'), true, 'expected package files allowlist to include bin/omx.js');
+    assert.equal(pkg.scripts?.['build:sparkshell'], 'node dist/scripts/build-sparkshell.js');
+    assert.equal(pkg.scripts?.['test:sparkshell'], 'node dist/scripts/test-sparkshell.js');
+    assert.equal(pkg.files?.includes('dist/'), true, 'expected package files allowlist to include the compiled dist/ tree');
     assert.equal(pkg.files?.includes('bin/'), false, 'did not expect broad bin/ allowlist in package files');
     assert.equal(pkg.files?.includes('bin/native/'), false, 'did not expect package files to include bin/native/');
-    assert.equal(pkg.files?.includes('scripts/build-sparkshell.mjs'), true);
-    assert.equal(pkg.files?.includes('scripts/test-sparkshell.mjs'), true);
+    assert.equal(pkg.files?.includes('dist/'), true);
+    assert.equal(pkg.files?.includes('src/scripts/'), true);
 
-    const buildScriptPath = join(process.cwd(), 'scripts', 'build-sparkshell.mjs');
-    const testScriptPath = join(process.cwd(), 'scripts', 'test-sparkshell.mjs');
+    const buildScriptPath = join(process.cwd(), 'dist', 'scripts', 'build-sparkshell.js');
+    const testScriptPath = join(process.cwd(), 'dist', 'scripts', 'test-sparkshell.js');
     assert.equal(existsSync(buildScriptPath), true, 'expected build sparkshell helper script to exist');
     assert.equal(existsSync(testScriptPath), true, 'expected test sparkshell helper script to exist');
 
@@ -51,7 +51,7 @@ describe('sparkshell packaging scaffold', () => {
         encoding: 'utf-8',
         env: {
           ...process.env,
-          OMX_SPARKSHELL_MANIFEST: join(process.cwd(), 'native', 'omx-sparkshell', 'Cargo.toml'),
+          OMX_SPARKSHELL_MANIFEST: join(process.cwd(), 'crates', 'omx-sparkshell', 'Cargo.toml'),
           OMX_SPARKSHELL_STAGE_DIR: stagedRoot,
         },
       });
@@ -67,8 +67,8 @@ describe('sparkshell packaging scaffold', () => {
       const results = JSON.parse(packed.stdout) as NpmPackDryRunResult[];
       const packedFiles = new Set((results[0]?.files ?? []).map((file) => file.path));
 
-      assert.equal(packedFiles.has('scripts/build-sparkshell.mjs'), true);
-      assert.equal(packedFiles.has('scripts/test-sparkshell.mjs'), true);
+      assert.equal(packedFiles.has('dist/scripts/build-sparkshell.js'), true);
+      assert.equal(packedFiles.has('dist/scripts/test-sparkshell.js'), true);
       assert.equal(packedFiles.has(packagedBinaryRelativePath.replaceAll('\\', '/')), false);
     } finally {
       rmSync(stagedRoot, { force: true, recursive: true });

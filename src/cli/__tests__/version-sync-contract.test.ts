@@ -19,10 +19,10 @@ describe('version sync contract', () => {
     const mux = TOML.parse(readFileSync(join(process.cwd(), 'crates', 'omx-mux', 'Cargo.toml'), 'utf-8')) as {
       package?: { version?: string | { workspace?: boolean } };
     };
-    const runtime = TOML.parse(readFileSync(join(process.cwd(), 'native', 'omx-runtime', 'Cargo.toml'), 'utf-8')) as {
+    const runtime = TOML.parse(readFileSync(join(process.cwd(), 'crates', 'omx-runtime', 'Cargo.toml'), 'utf-8')) as {
       package?: { version?: string | { workspace?: boolean } };
     };
-    const sparkshell = TOML.parse(readFileSync(join(process.cwd(), 'native', 'omx-sparkshell', 'Cargo.toml'), 'utf-8')) as {
+    const sparkshell = TOML.parse(readFileSync(join(process.cwd(), 'crates', 'omx-sparkshell', 'Cargo.toml'), 'utf-8')) as {
       package?: { version?: string | { workspace?: boolean } };
     };
 
