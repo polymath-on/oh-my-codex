@@ -3,7 +3,7 @@
 <p align="center">
   <img src="https://yeachan-heo.github.io/oh-my-codex-website/omx-character-nobg.png" alt="oh-my-codex character" width="280">
   <br>
-  <em>Make Codex easier to steer, reuse, and scale up.</em>
+  <em>Start Codex stronger, then let OMX add better prompts, workflows, and runtime help when the work grows.</em>
 </p>
 
 [![npm version](https://img.shields.io/npm/v/oh-my-codex)](https://www.npmjs.com/package/oh-my-codex)
@@ -14,23 +14,43 @@
 **Website:** https://yeachan-heo.github.io/oh-my-codex-website/  
 **Docs:** [Getting Started](./docs/getting-started.html) · [Agents](./docs/agents.html) · [Skills](./docs/skills.html) · [Integrations](./docs/integrations.html) · [Demo](./DEMO.md) · [OpenClaw guide](./docs/openclaw-integration.md)
 
-OMX is an operational layer for [OpenAI Codex CLI](https://github.com/openai/codex).
+OMX is a workflow layer for [OpenAI Codex CLI](https://github.com/openai/codex).
 
-It keeps Codex as the execution engine and adds:
-- installable **prompts** and **skills**
-- durable **team orchestration** for bigger tasks
-- operator commands like `setup`, `doctor`, `status`, and `cancel`
-- project/runtime state under `.omx/`
+It keeps Codex as the execution engine and makes it easier to:
+- start a stronger Codex session by default
+- reuse good prompts with `/prompts:*`
+- invoke workflows with skills like `$plan`, `$ralph`, and `$team`
+- keep project guidance, plans, logs, and state in `.omx/`
 
-## Who it is for
+## Recommended default flow
 
-Use OMX if you already like Codex and want one or more of these:
-- reusable agent prompts such as `/prompts:architect`
-- workflow shortcuts such as `$plan`, `$team`, and `$ralph`
-- a durable team runtime for bigger tasks
-- better visibility into long-running work
+If you want the default OMX experience, start here:
 
-If you just want plain Codex with no extra workflow layer, you probably do not need OMX.
+```bash
+npm install -g @openai/codex oh-my-codex
+omx setup
+omx --madmax --high
+```
+
+Then work normally inside Codex:
+
+```text
+/prompts:architect "analyze the authentication flow"
+$plan "ship this feature cleanly"
+```
+
+That is the main path.
+Start OMX strongly, do the work in Codex, and let the agent pull in `$team` or other workflows only when the task actually needs them.
+
+## What OMX is for
+
+Use OMX if you already like Codex and want a better day-to-day runtime around it:
+- reusable role prompts such as `/prompts:architect` and `/prompts:executor`
+- reusable workflows such as `$plan`, `$ralph`, `$team`, and `$deep-interview`
+- project guidance through scoped `AGENTS.md`
+- durable state under `.omx/` for plans, logs, memory, and mode tracking
+
+If you want plain Codex with no extra workflow layer, you probably do not need OMX.
 
 ## Quick start
 
@@ -39,136 +59,93 @@ If you just want plain Codex with no extra workflow layer, you probably do not n
 - Node.js 20+
 - Codex CLI installed: `npm install -g @openai/codex`
 - Codex auth configured
-- `tmux` if you want `omx team` on macOS/Linux
-- `psmux` if you want native Windows team mode
+- `tmux` on macOS/Linux if you later want the durable team runtime
+- `psmux` on native Windows if you later want Windows team mode
 
-### Install
+### A good first session
 
-```bash
-npm install -g @openai/codex oh-my-codex
-omx setup
-omx doctor
-```
-
-### Fastest useful example
-
-Launch Codex with OMX:
+Launch OMX the recommended way:
 
 ```bash
-omx
+omx --madmax --high
 ```
 
-Then try one command inside Codex:
+Then try one prompt and one skill:
 
 ```text
 /prompts:architect "analyze the authentication flow"
+$plan "map the safest implementation path"
 ```
 
-That is the fastest way to feel what OMX changes: you get installable prompts, skills, and project guidance layered into a normal Codex session.
-
-### First team run
-
-If you want coordinated multi-agent execution:
-
-```bash
-omx team 3:executor "fix the failing tests with verification"
-```
-
-Check on it later with:
-
-```bash
-omx team status <team-name>
-omx team resume <team-name>
-omx team shutdown <team-name>
-```
-
-## Core commands
-
-### In the terminal
-
-| Command | What it does |
-| --- | --- |
-| `omx` | Launch Codex with OMX wiring |
-| `omx setup` | Install prompts, skills, config, and AGENTS scaffolding |
-| `omx doctor` | Verify the install |
-| `omx team 3:executor "..."` | Start a coordinated tmux-based team |
-| `omx team status <team-name>` | Inspect a running team |
-| `omx status` | Show active OMX modes |
-| `omx cancel` | Cancel active modes |
-| `omx explore --prompt "..."` | Read-only repository exploration |
-| `omx sparkshell <command>` | Shell-native inspection helper |
-| `omx version` | Show version info |
-
-### Inside Codex
-
-| Command | Use it for |
-| --- | --- |
-| `/prompts:architect "..."` | Analysis and boundary review |
-| `/prompts:executor "..."` | Focused implementation work |
-| `/skills` | Browse installed skills |
-| `$plan "..."` | Build a plan before implementation |
-| `$team 3:executor "..."` | Kick off coordinated team execution |
-| `$ralph "..."` | Run persistent sequential execution |
+If the task grows, the agent can escalate to heavier workflows such as `$ralph` for persistent execution or `$team` for coordinated parallel work.
 
 ## A simple mental model
 
 OMX does **not** replace Codex.
 
-It adds a lightweight runtime around it:
+It adds a better working layer around it:
 - **Codex** does the actual agent work
-- **OMX prompts and skills** make common roles and workflows reusable
-- **`omx team`** adds durable tmux/worktree orchestration for bigger jobs
-- **`.omx/`** stores runtime state, plans, logs, and memory
+- **OMX prompts** make useful roles reusable
+- **OMX skills** make common workflows reusable
+- **`.omx/`** stores plans, logs, memory, and runtime state
+
+Most users should think of OMX as **better prompting + better workflow + better runtime**, not as a command surface to operate manually all day.
 
 ## Start here if you are new
 
 1. Run `omx setup`
-2. Run `omx`
-3. Try `/prompts:architect "analyze <something>"`
-4. Try `/skills`
-5. When work gets bigger, use `$plan` or `omx team`
+2. Launch with `omx --madmax --high`
+3. Ask for analysis with `/prompts:architect "..."`
+4. Ask for planning with `$plan "..."`
+5. Let the agent decide when `$ralph`, `$team`, or another workflow is worth using
 
-## Power-user notes
+## Common in-session surfaces
 
-### Team Mode vs Ultrawork
+| Surface | Use it for |
+| --- | --- |
+| `/prompts:architect "..."` | analysis, boundaries, tradeoffs |
+| `/prompts:executor "..."` | focused implementation work |
+| `/skills` | browsing installed skills |
+| `$plan "..."` | planning before implementation |
+| `$ralph "..."` | persistent sequential execution |
+| `$team "..."` | coordinated parallel execution when the task is big enough |
 
-- **Team Mode** is the default for bigger, shared-context tasks. It gives you durable tmux/state/worktree orchestration.
-- **Ultrawork** is lighter parallel fanout for more independent subtasks.
+## Advanced / operator surfaces
 
-Short version: **Ultrawork is parallelism. Team Mode is orchestration.**
+These are useful, but they are not the main onboarding path.
 
-### `omx explore` vs `omx sparkshell`
+### Team runtime
 
-- Use **`omx explore`** for read-only repo lookup driven by a prompt.
-- Use **`omx sparkshell`** when you want direct shell-style inspection or tmux pane capture.
+Use the team runtime when you specifically need durable tmux/worktree coordination, not as the default way to begin using OMX.
+
+```bash
+omx team 3:executor "fix the failing tests with verification"
+omx team status <team-name>
+omx team resume <team-name>
+omx team shutdown <team-name>
+```
+
+### Setup, doctor, and HUD
+
+These are operator/support surfaces:
+- `omx setup` installs prompts, skills, config, and AGENTS scaffolding
+- `omx doctor` verifies the install when something seems wrong
+- `omx hud --watch` is a monitoring/status surface, not the primary user workflow
+
+### Explore and sparkshell
+
+- `omx explore --prompt "..."` is for read-only repository lookup
+- `omx sparkshell <command>` is for shell-native inspection and bounded verification
 
 Examples:
 
 ```bash
-omx explore --prompt "git log --oneline -10"
+omx explore --prompt "find where team state is written"
 omx sparkshell git status
 omx sparkshell --tmux-pane %12 --tail-lines 400
 ```
 
-### What `omx setup` writes
-
-`omx setup` installs and updates the OMX surfaces Codex uses:
-- prompts under `~/.codex/prompts/`
-- skills under `~/.codex/skills/`
-- OMX config entries in Codex config
-- scope-aware `AGENTS.md` scaffolding
-- runtime state under `.omx/`
-
-### Model defaults
-
-OMX uses explicit default model lanes:
-- `OMX_DEFAULT_FRONTIER_MODEL`
-- `OMX_DEFAULT_STANDARD_MODEL`
-- `OMX_DEFAULT_SPARK_MODEL`
-
-You can override them in your shell env or in `~/.codex/.omx-config.json`.
-
-## Platform notes
+### Platform notes for team mode
 
 `omx team` needs a tmux-compatible backend:
 
