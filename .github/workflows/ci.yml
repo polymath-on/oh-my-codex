@@ -85,10 +85,12 @@ jobs:
       - name: Run full suite
         if: matrix.lane == 'full'
         run: npm test
-      - name: Run smoke suite
+      - name: Run cross-rebase smoke command
+        if: matrix.lane == 'smoke'
+        run: npm run test:team:cross-rebase-smoke
+      - name: Run remaining smoke suite
         if: matrix.lane == 'smoke'
         run: |
-          npm run build
           node --test \
             dist/cli/__tests__/packaged-script-resolution.test.js \
             dist/cli/__tests__/package-bin-contract.test.js \
