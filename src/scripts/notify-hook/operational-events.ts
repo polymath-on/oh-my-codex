@@ -39,6 +39,7 @@ function gitValue(cwd: any, args: string[]): string {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 2000,
+      windowsHide: true,
     }).trim();
   } catch {
     return '';
@@ -83,6 +84,7 @@ export function resolveOperationalSessionName(cwd: any, sessionId = '', sessionN
         encoding: 'utf-8',
         stdio: ['ignore', 'pipe', 'ignore'],
         timeout: 2000,
+        windowsHide: true,
       }).trim();
       if (tmuxSession) return tmuxSession;
     } catch {

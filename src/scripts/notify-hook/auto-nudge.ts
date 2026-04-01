@@ -380,7 +380,7 @@ function resolveCodexPaneByCwdFallback(cwd) {
   try {
     const panes = execFileSync('tmux', [
       'list-panes', '-a', '-F', '#{pane_id}	#{pane_current_path}	#{pane_current_command}	#{pane_start_command}',
-    ], { encoding: 'utf-8', timeout: 2000 })
+    ], { encoding: 'utf-8', timeout: 2000, windowsHide: true })
       .trim()
       .split('\n')
       .filter(Boolean);

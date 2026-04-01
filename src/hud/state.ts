@@ -182,6 +182,7 @@ function runGit(cwd: string, args: string[]): string | null {
       encoding: 'utf-8',
       timeout: 2000,
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
     }).trim() || null;
   } catch {
     return null;

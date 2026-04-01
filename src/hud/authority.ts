@@ -39,6 +39,7 @@ async function defaultRunProcess(
     encoding: 'utf-8',
     stdio: 'ignore',
     timeout: options.timeoutMs,
+    windowsHide: true,
   });
   if (result.status !== 0) {
     throw new Error((result.stderr || result.stdout || '').trim() || `hud authority tick failed with status ${result.status ?? 'unknown'}`);

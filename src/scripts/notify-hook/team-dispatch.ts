@@ -31,6 +31,7 @@ function runtimeExec(command) {
     execFileSync(binaryPath, ['exec', JSON.stringify(command)], {
       timeout: 5000,
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
     });
   } catch {
     // non-fatal: JS path is the fallback
