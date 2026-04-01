@@ -170,7 +170,10 @@ describe('Team Exec Stage', () => {
     const descriptor = (result.artifacts as Record<string, unknown>).teamDescriptor as Record<string, unknown>;
     assert.equal(descriptor.task, 'raw task description');
     assert.equal(typeof (descriptor.staffingPlan as Record<string, unknown>).staffingSummary, 'string');
-    assert.equal(descriptor.bootstrapCommand, (descriptor.staffingPlan as Record<string, unknown>).launchHints && ((descriptor.staffingPlan as Record<string, unknown>).launchHints as Record<string, unknown>).shellCommand);
+    assert.equal(
+      descriptor.bootstrapCommand,
+      ((descriptor.staffingPlan as Record<string, unknown>).launchHints as Record<string, unknown>).shellCommand,
+    );
   });
 
   describe('buildTeamInstruction', () => {
@@ -184,6 +187,8 @@ describe('Team Exec Stage', () => {
         agentType: 'executor',
         availableAgentTypes: ['executor', 'test-engineer'],
         staffingPlan,
+        bootstrapCommand: staffingPlan.launchHints.shellCommand,
+        postLaunchLaneAllocation: staffingPlan.allocations,
         useWorktrees: false,
         cwd: '/tmp/test',
       });
@@ -205,6 +210,8 @@ describe('Team Exec Stage', () => {
         agentType: 'executor',
         availableAgentTypes: ['executor', 'test-engineer'],
         staffingPlan,
+        bootstrapCommand: staffingPlan.launchHints.shellCommand,
+        postLaunchLaneAllocation: staffingPlan.allocations,
         useWorktrees: false,
         cwd: '/tmp',
       });
@@ -273,6 +280,11 @@ describe('Ralph Verify Stage', () => {
         availableAgentTypes: ['architect', 'executor', 'test-engineer'],
         staffingPlan,
         executionArtifacts: {},
+        handoffPolicy: {
+          requiresAutopilotHandoff: true,
+          exclusivityGuard: 'autopilot-and-ralph-cannot-overlap',
+          recommendedTransition: 'finish_autopilot_then_start_ralph',
+        },
       });
 
       assert.match(instruction, /max_iterations=15/);
@@ -292,6 +304,11 @@ describe('Ralph Verify Stage', () => {
         availableAgentTypes: ['architect', 'executor', 'test-engineer'],
         staffingPlan,
         executionArtifacts: {},
+        handoffPolicy: {
+          requiresAutopilotHandoff: true,
+          exclusivityGuard: 'autopilot-and-ralph-cannot-overlap',
+          recommendedTransition: 'finish_autopilot_then_start_ralph',
+        },
       });
 
       assert.match(instruction, /^omx ralph /);

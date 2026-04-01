@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { cancelMode, readModeState, startMode, updateModeState } from '../modes/base.js';
+import { cancelMode, readModeState, startMode, updateModeState, type ModeState } from '../modes/base.js';
 import { getDefaultBridge, isBridgeEnabled, type RuntimeSnapshot } from '../runtime/bridge.js';
 import type {
   AutopilotControllerAction,
@@ -70,7 +70,7 @@ export interface RuntimeBridgeSummary {
   authority_owner: string | null;
 }
 
-export interface AutopilotControllerStateExtension extends PipelineModeStateExtension {
+export interface AutopilotControllerStateExtension extends ModeState, PipelineModeStateExtension {
   autopilot_entrypoint: string;
   autopilot_controller_version: string;
   autopilot_controller_phase: ControllerPhase;
