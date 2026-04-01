@@ -44,6 +44,12 @@ omx team status <team-name>
 omx team shutdown <team-name>
 ```
 
+## Empfohlener Workflow
+
+1. `$deep-interview` — wenn Scope oder Grenzen noch unklar sind.
+2. `$ralplan` — um daraus einen abgestimmten Architektur- und Umsetzungsplan zu machen.
+3. `$team` — wenn der freigegebene Plan groß genug für koordinierte Parallelisierung ist.
+
 ## Kernmodell
 
 OMX installiert und verbindet diese Schichten:

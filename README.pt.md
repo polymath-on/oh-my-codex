@@ -44,6 +44,12 @@ omx team status <team-name>
 omx team shutdown <team-name>
 ```
 
+## Fluxo recomendado
+
+1. `$deep-interview` — quando escopo ou limites ainda não estão claros.
+2. `$ralplan` — para transformar esse escopo esclarecido em um plano aprovado de arquitetura e implementação.
+3. `$team` — quando o plano aprovado já é grande o bastante para execução paralela coordenada.
+
 ## Modelo central
 
 OMX instala e conecta estas camadas:

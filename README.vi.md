@@ -45,6 +45,12 @@ omx team status <team-name>
 omx team shutdown <team-name>
 ```
 
+## Quy trình được khuyến nghị
+
+1. `$deep-interview` — khi phạm vi hoặc ranh giới vẫn chưa rõ.
+2. `$ralplan` — để biến phạm vi đã làm rõ thành kế hoạch kiến trúc và triển khai đã được chốt.
+3. `$team` — khi kế hoạch đã duyệt đủ lớn để đáng dùng thực thi song song có phối hợp.
+
 ## Mô hình cốt lõi
 
 OMX cài đặt và kết nối các lớp sau:

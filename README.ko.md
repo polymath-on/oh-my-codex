@@ -45,6 +45,12 @@ omx team status <team-name>
 omx team shutdown <team-name>
 ```
 
+## 권장 워크플로
+
+1. `$deep-interview` — 범위나 경계가 아직 모호할 때 먼저 명확히 합니다.
+2. `$ralplan` — 정리된 범위를 승인 가능한 아키텍처 및 구현 계획으로 바꿉니다.
+3. `$team` — 승인된 계획이 충분히 커서 조정된 병렬 실행이 유리할 때 사용합니다.
+
 ## 핵심 모델
 
 OMX는 다음 레이어를 설치하고 연결합니다:

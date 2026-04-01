@@ -45,6 +45,12 @@ omx team status <team-name>
 omx team shutdown <team-name>
 ```
 
+## 建議工作流程
+
+1. `$deep-interview` — 當範圍或邊界仍不清楚時，先用它釐清需求。
+2. `$ralplan` — 把釐清後的範圍整理成可核准的架構與實作計畫。
+3. `$team` — 當核准後的計畫夠大，值得協調平行執行時再用。
+
 ## 核心模型
 
 OMX 安裝並串接以下各層：

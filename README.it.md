@@ -44,6 +44,12 @@ omx team status <team-name>
 omx team shutdown <team-name>
 ```
 
+## Flusso consigliato
+
+1. `$deep-interview` — quando ambito o confini non sono ancora chiari.
+2. `$ralplan` — per trasformare l’ambito chiarito in un piano approvato di architettura e implementazione.
+3. `$team` — quando il piano approvato è abbastanza ampio da richiedere esecuzione parallela coordinata.
+
 ## Modello di base
 
 OMX installa e collega questi livelli:

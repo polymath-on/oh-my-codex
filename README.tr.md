@@ -44,6 +44,12 @@ omx team status <team-name>
 omx team shutdown <team-name>
 ```
 
+## Önerilen iş akışı
+
+1. `$deep-interview` — kapsam veya sınırlar hâlâ net değilse.
+2. `$ralplan` — netleşen kapsamı onaylanmış bir mimari ve uygulama planına dönüştürmek için.
+3. `$team` — onaylı plan koordineli paralel yürütmeyi gerektirecek kadar büyükse.
+
 ## Temel Model
 
 OMX şu katmanları kurar ve bağlar:
