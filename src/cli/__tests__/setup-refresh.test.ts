@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
   mkdtemp,
   mkdir,
@@ -95,19 +96,22 @@ describe("omx setup refresh summary and dry-run behavior", () => {
     }
   });
 
-  it("creates .gitignore with a .omx/ entry during project-scoped setup", async () => {
+  it("creates .gitignore with .omx/ and .codex/ entries during project-scoped setup", async () => {
     const wd = await mkdtemp(join(tmpdir(), "omx-setup-refresh-"));
     try {
       await runSetupInTempDir(wd, { scope: "project" });
 
       assert.equal(existsSync(join(wd, ".omx", "state")), true);
-      assert.equal(await readFile(join(wd, ".gitignore"), "utf-8"), ".omx/\n");
+      assert.equal(
+        await readFile(join(wd, ".gitignore"), "utf-8"),
+        ".omx/\n.codex/\n",
+      );
     } finally {
       await rm(wd, { recursive: true, force: true });
     }
   });
 
-  it("appends .omx/ to an existing project .gitignore without duplicating it", async () => {
+  it("appends missing .omx/ and .codex/ entries to an existing project .gitignore without duplicating them", async () => {
     const wd = await mkdtemp(join(tmpdir(), "omx-setup-refresh-"));
     try {
       await writeFile(join(wd, ".gitignore"), "node_modules/\n");
@@ -116,8 +120,30 @@ describe("omx setup refresh summary and dry-run behavior", () => {
       await runSetupInTempDir(wd, { scope: "project" });
 
       const gitignore = await readFile(join(wd, ".gitignore"), "utf-8");
-      assert.equal(gitignore, "node_modules/\n.omx/\n");
+      assert.equal(gitignore, "node_modules/\n.omx/\n.codex/\n");
       assert.equal(gitignore.match(/^\.omx\/$/gm)?.length ?? 0, 1);
+      assert.equal(gitignore.match(/^\.codex\/$/gm)?.length ?? 0, 1);
+    } finally {
+      await rm(wd, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps repo-local .codex ignored in a fresh git repo after project-scoped setup", async () => {
+    const wd = await mkdtemp(join(tmpdir(), "omx-setup-refresh-"));
+    try {
+      const initResult = spawnSync("git", ["init", "-q"], { cwd: wd });
+      assert.equal(initResult.status, 0);
+
+      await runSetupInTempDir(wd, { scope: "project" });
+
+      const status = spawnSync(
+        "git",
+        ["status", "--short", "--ignored", ".codex", ".gitignore", "AGENTS.md"],
+        { cwd: wd, encoding: "utf-8" },
+      );
+      assert.equal(status.status, 0);
+      assert.match(status.stdout, /^!! \.codex\/$/m);
+      assert.doesNotMatch(status.stdout, /^\?\? \.codex\/$/m);
     } finally {
       await rm(wd, { recursive: true, force: true });
     }

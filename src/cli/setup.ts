@@ -122,7 +122,7 @@ export interface SkillFrontmatterMetadata {
   description: string;
 }
 
-const PROJECT_OMX_GITIGNORE_ENTRY = ".omx/";
+const PROJECT_GITIGNORE_ENTRIES = [".omx/", ".codex/"] as const;
 
 function applyScopePathRewritesToAgentsTemplate(
   content: string,
@@ -550,7 +550,7 @@ function hasGitignoreEntry(content: string, entry: string): boolean {
     .some((line) => line === entry);
 }
 
-async function ensureProjectOmxGitignore(
+async function ensureProjectGitignore(
   projectRoot: string,
   backupContext: SetupBackupContext,
   options: Pick<SetupOptions, "dryRun" | "verbose">,
@@ -561,13 +561,17 @@ async function ensureProjectOmxGitignore(
     ? await readFile(gitignorePath, "utf-8")
     : "";
 
-  if (hasGitignoreEntry(existing, PROJECT_OMX_GITIGNORE_ENTRY)) {
+  const missingEntries = PROJECT_GITIGNORE_ENTRIES.filter(
+    (entry) => !hasGitignoreEntry(existing, entry),
+  );
+
+  if (missingEntries.length === 0) {
     return "unchanged";
   }
 
   const nextContent = destinationExists
-    ? `${existing}${existing.endsWith("\n") || existing.length === 0 ? "" : "\n"}${PROJECT_OMX_GITIGNORE_ENTRY}\n`
-    : `${PROJECT_OMX_GITIGNORE_ENTRY}\n`;
+    ? `${existing}${existing.endsWith("\n") || existing.length === 0 ? "" : "\n"}${missingEntries.join("\n")}\n`
+    : `${PROJECT_GITIGNORE_ENTRIES.join("\n")}\n`;
 
   if (
     await ensureBackup(gitignorePath, destinationExists, backupContext, options)
@@ -581,7 +585,7 @@ async function ensureProjectOmxGitignore(
 
   if (options.verbose) {
     console.log(
-      `  ${options.dryRun ? "would update" : destinationExists ? "updated" : "created"} .gitignore (${PROJECT_OMX_GITIGNORE_ENTRY})`,
+      `  ${options.dryRun ? "would update" : destinationExists ? "updated" : "created"} .gitignore (${missingEntries.join(", ")})`,
     );
   }
 
@@ -650,18 +654,18 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   console.log("  Done.\n");
 
   if (resolvedScope.scope === "project") {
-    const gitignoreResult = await ensureProjectOmxGitignore(
+    const gitignoreResult = await ensureProjectGitignore(
       projectRoot,
       backupContext,
       { dryRun, verbose },
     );
     if (gitignoreResult === "created") {
       console.log(
-        "  Created .gitignore with .omx/ so local OMX runtime state stays out of source control.\n",
+        "  Created .gitignore with .omx/ and .codex/ so local OMX runtime/config state stays out of source control.\n",
       );
     } else if (gitignoreResult === "updated") {
       console.log(
-        "  Added .omx/ to .gitignore so local OMX runtime state stays out of source control.\n",
+        "  Added .omx/ and/or .codex/ to .gitignore so local OMX runtime/config state stays out of source control.\n",
       );
     }
   }
