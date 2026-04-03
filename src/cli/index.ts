@@ -16,7 +16,13 @@ import { hudCommand } from "../hud/index.js";
 import { teamCommand } from "./team.js";
 import { ralphCommand } from "./ralph.js";
 import { askCommand } from "./ask.js";
-import { cleanupCommand } from "./cleanup.js";
+import {
+  cleanupCommand,
+  cleanupOmxMcpProcesses,
+  findLaunchSafeCleanupCandidates,
+  type CleanupDependencies,
+  type CleanupResult,
+} from "./cleanup.js";
 import { exploreCommand } from "./explore.js";
 import { sparkshellCommand } from "./sparkshell.js";
 import { agentsInitCommand } from "./agents-init.js";
@@ -1588,14 +1594,25 @@ export function buildNotifyFallbackWatcherEnv(
   };
 }
 
+export async function cleanupLaunchOrphanedMcpProcesses(
+  dependencies: CleanupDependencies = {},
+): Promise<CleanupResult> {
+  return cleanupOmxMcpProcesses([], {
+    ...dependencies,
+    selectCandidates: dependencies.selectCandidates ?? findLaunchSafeCleanupCandidates,
+    writeLine: dependencies.writeLine ?? (() => {}),
+  });
+}
+
 /**
  * preLaunch: Prepare environment before Codex starts.
- * 1. Generate runtime overlay + write session-scoped model instructions file
- * 2. Write session.json
+ * 1. Best-effort launch-safe orphan cleanup for detached OMX MCP processes
+ * 2. Generate runtime overlay + write session-scoped model instructions file
+ * 3. Write session.json
  *
- * Automatic stale-session cleanup is intentionally disabled here. Destructive
- * cleanup must be explicit via `omx cleanup` so normal launches never reap
- * files or processes from other OMX sessions.
+ * Automatic broad stale-session cleanup remains disabled here. Only detached
+ * OMX MCP processes without a live Codex ancestor are reaped so new launches
+ * do not accumulate stale processes from prior crashed/closed sessions.
  */
 async function preLaunch(
   cwd: string,
@@ -1604,7 +1621,25 @@ async function preLaunch(
   codexHomeOverride?: string,
   enableNotifyFallbackAuthority: boolean = false,
 ): Promise<void> {
-  // 1. Generate runtime overlay + write session-scoped model instructions file
+  // 1. Best-effort launch-safe orphan cleanup
+  try {
+    const cleanup = await cleanupLaunchOrphanedMcpProcesses();
+    if (cleanup.terminatedCount > 0) {
+      console.log(
+        `[omx] Reaped ${cleanup.terminatedCount} orphaned OMX MCP process(es) before launch.`,
+      );
+    }
+    if (cleanup.failedPids.length > 0) {
+      console.warn(
+        `[omx] Failed to reap ${cleanup.failedPids.length} orphaned OMX MCP process(es); continuing launch.`,
+      );
+    }
+  } catch (err) {
+    process.stderr.write(`[cli/index] operation failed: ${err}\n`);
+    // Non-fatal
+  }
+
+  // 2. Generate runtime overlay + write session-scoped model instructions file
   const orchestrationMode = await resolveSessionOrchestrationMode(
     cwd,
     sessionId,
@@ -1619,11 +1654,11 @@ ${launchAppendix}`
       : overlay;
   await writeSessionModelInstructionsFile(cwd, sessionId, sessionInstructions);
 
-  // 2. Write session state
+  // 3. Write session state
   await resetSessionMetrics(cwd);
   await writeSessionStart(cwd, sessionId);
 
-  // 3. Start notify fallback watcher (best effort)
+  // 4. Start notify fallback watcher (best effort)
   try {
     await startNotifyFallbackWatcher(cwd, { codexHomeOverride, enableAuthority: enableNotifyFallbackAuthority, sessionId });
   } catch (err) {
@@ -1631,7 +1666,7 @@ ${launchAppendix}`
     // Non-fatal
   }
 
-  // 4. Start derived watcher (best effort, opt-in)
+  // 5. Start derived watcher (best effort, opt-in)
   try {
     await startHookDerivedWatcher(cwd);
   } catch (err) {
@@ -1639,7 +1674,7 @@ ${launchAppendix}`
     // Non-fatal
   }
 
-  // 5. Emit temp notification startup summary + warnings, then send session-start lifecycle notification (best effort)
+  // 6. Emit temp notification startup summary + warnings, then send session-start lifecycle notification (best effort)
   try {
     if (notifyTempContract?.active) {
       process.env[OMX_NOTIFY_TEMP_CONTRACT_ENV] =
@@ -1671,7 +1706,7 @@ ${launchAppendix}`
     // Non-fatal: notification failures must never block launch
   }
 
-  // 6. Dispatch native hook event (best effort)
+  // 7. Dispatch native hook event (best effort)
   try {
     await emitNativeHookEvent(cwd, "session-start", {
       session_id: sessionId,

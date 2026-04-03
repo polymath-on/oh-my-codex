@@ -34,6 +34,7 @@ import {
   resolveNotifyTempContract,
   buildNotifyTempStartupMessages,
   buildNotifyFallbackWatcherEnv,
+  cleanupLaunchOrphanedMcpProcesses,
   resolveBackgroundHelperLaunchMode,
   shouldDetachBackgroundHelper,
   resolveNotifyFallbackWatcherScript,
@@ -45,6 +46,7 @@ import {
   DEFAULT_FRONTIER_MODEL,
   getTeamLowComplexityModel,
 } from "../../config/models.js";
+import type { ProcessEntry } from "../cleanup.js";
 
 function expectedLowComplexityModel(codexHomeOverride?: string): string {
   return getTeamLowComplexityModel(codexHomeOverride);
@@ -237,6 +239,67 @@ describe("resolveNotifyTempContract", () => {
     assert.equal(parsed.contract.active, true);
     assert.equal(parsed.contract.source, "env");
     assert.deepEqual(parsed.passthroughArgs, ["--model", "gpt-5"]);
+  });
+});
+
+describe("cleanupLaunchOrphanedMcpProcesses", () => {
+  it("reaps only detached OMX MCP processes without a live Codex ancestor", async () => {
+    const processes: ProcessEntry[] = [
+      { pid: 700, ppid: 500, command: "codex" },
+      { pid: 701, ppid: 700, command: "node /repo/bin/omx.js" },
+      {
+        pid: 710,
+        ppid: 700,
+        command: "node /repo/oh-my-codex/dist/mcp/state-server.js",
+      },
+      {
+        pid: 800,
+        ppid: 1,
+        command: "node /tmp/oh-my-codex/dist/mcp/memory-server.js",
+      },
+      {
+        pid: 810,
+        ppid: 42,
+        command: "node /tmp/oh-my-codex/dist/mcp/trace-server.js",
+      },
+      {
+        pid: 820,
+        ppid: 50,
+        command: "codex --model gpt-5",
+      },
+      {
+        pid: 821,
+        ppid: 820,
+        command: "node /tmp/other-session/dist/mcp/state-server.js",
+      },
+    ];
+    const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    const alive = new Set([800, 810]);
+
+    const result = await cleanupLaunchOrphanedMcpProcesses({
+      currentPid: 701,
+      listProcesses: () => processes,
+      isPidAlive: (pid) => alive.has(pid),
+      sendSignal: (pid, signal) => {
+        signals.push({ pid, signal });
+        alive.delete(pid);
+      },
+      sleep: async () => {},
+      now: () => 0,
+    });
+
+    assert.equal(result.terminatedCount, 2);
+    assert.equal(result.forceKilledCount, 0);
+    assert.deepEqual(result.failedPids, []);
+    assert.deepEqual(signals, [
+      { pid: 800, signal: "SIGTERM" },
+      { pid: 810, signal: "SIGTERM" },
+    ]);
+    assert.equal(
+      signals.some(({ pid }) => pid === 821),
+      false,
+      "launch-safe cleanup must preserve OMX MCP processes still attached to another live Codex tree",
+    );
   });
 });
 
