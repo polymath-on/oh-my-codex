@@ -80,7 +80,8 @@ function detectOmxConfigArtifacts(config: string): {
 
   const hasFeatureFlags =
     /^\s*multi_agent\s*=\s*true/m.test(config) ||
-    /^\s*child_agents_md\s*=\s*true/m.test(config);
+    /^\s*child_agents_md\s*=\s*true/m.test(config) ||
+    /^\s*codex_hooks\s*=\s*true/m.test(config);
   const hasExploreRoutingEnv = /^\s*USE_OMX_EXPLORE_CMD\s*=/m.test(config);
 
   return {
@@ -353,7 +354,7 @@ function printSummary(summary: UninstallSummary, dryRun: boolean): void {
       );
     }
     if (summary.featureFlagsRemoved) {
-      console.log("    Feature flags (multi_agent, child_agents_md)");
+      console.log("    Feature flags (multi_agent, child_agents_md, codex_hooks)");
     }
   } else if (!summary.configCleaned && summary.mcpServersRemoved.length === 0) {
     console.log("  config.toml: no OMX entries found (or --keep-config used)");

@@ -150,6 +150,7 @@ describe('config generator', () => {
       assert.equal((rerun.match(/^\[features\]$/gm) ?? []).length, 1);
       assert.match(rerun, /^multi_agent = true$/m);
       assert.match(rerun, /^child_agents_md = true$/m);
+      assert.match(rerun, /^codex_hooks = true$/m);
 
       // User content preserved
       assert.match(rerun, /^\[user.settings\]$/m);
@@ -213,6 +214,7 @@ describe('config generator', () => {
 
       // OMX feature flags added
       assert.match(toml, /^multi_agent = true$/m);
+      assert.match(toml, /^codex_hooks = true$/m);
     } finally {
       await rm(wd, { recursive: true, force: true });
     }
@@ -256,6 +258,7 @@ describe('config generator', () => {
 
       // multi_agent replaces it
       assert.match(toml, /^multi_agent = true$/m);
+      assert.match(toml, /^codex_hooks = true$/m);
 
       // other user flags preserved
       assert.match(toml, /^web_search = true$/m);
@@ -326,6 +329,7 @@ describe('config generator', () => {
       assert.match(merged, /^custom_user_flag = false$/m);
       assert.match(merged, /^multi_agent = true$/m);
       assert.match(merged, /^child_agents_md = true$/m);
+      assert.match(merged, /^codex_hooks = true$/m);
       assert.match(merged, /^\[user.settings\]$/m);
       assert.match(merged, /^name = "kept"$/m);
     } finally {

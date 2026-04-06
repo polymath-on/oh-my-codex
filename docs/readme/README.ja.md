@@ -86,10 +86,10 @@ omx help
 
 OMXにはプラグインのスキャフォールディングとバリデーション用の`omx hooks`が含まれるようになりました。
 
-- `omx tmux-hook`は引き続きサポートされ、変更されていません。
-- `omx hooks`は追加的であり、tmux-hookワークフローを置き換えません。
+- 非teamセッションは native-hook-first になりました。
+- `omx tmux-hook` は team runtime と従来の tmux トラブルシュート専用です。
 - プラグインファイルは`.omx/hooks/*.mjs`に配置されます。
-- プラグインはデフォルトで無効です；`OMX_HOOK_PLUGINS=1`で有効にします。
+- プラグインはデフォルトで有効です；`OMX_HOOK_PLUGINS=0`で無効にします。
 
 完全な拡張ワークフローとイベントモデルについては`docs/hooks-extension.md`を参照してください。
 

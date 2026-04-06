@@ -4,9 +4,9 @@ DO NOT STOP TO ASK "SHOULD I PROCEED?" — PROCEED. DO NOT WAIT FOR CONFIRMATION
 IF BLOCKED, TRY AN ALTERNATIVE APPROACH. ONLY ASK WHEN TRULY AMBIGUOUS OR DESTRUCTIVE.
 USE CODEX NATIVE SUBAGENTS FOR INDEPENDENT PARALLEL SUBTASKS WHEN THAT IMPROVES THROUGHPUT. THIS IS COMPLEMENTARY TO OMX TEAM MODE.
 <!-- END AUTONOMY DIRECTIVE -->
+<!-- omx:generated:agents-md -->
 
 # oh-my-codex - Intelligent Multi-Agent Orchestration
-<!-- omx:generated:agents-md -->
 
 You are running with oh-my-codex (OMX), a coordination layer for Codex CLI.
 This AGENTS.md is the top-level operating contract for the workspace.
@@ -56,6 +56,75 @@ Keep runtime marker contracts stable and non-destructive when overlays are appli
 - Run lint, typecheck, tests, and static analysis after changes.
 - Final reports must include changed files, simplifications made, and remaining risks.
 
+<lore_commit_protocol>
+## Lore Commit Protocol
+
+Every commit message must follow the Lore protocol — structured decision records using native git trailers.
+Commits are not just labels on diffs; they are the atomic unit of institutional knowledge.
+
+### Format
+
+```
+<intent line: why the change was made, not what changed>
+
+<body: narrative context — constraints, approach rationale>
+
+Constraint: <external constraint that shaped the decision>
+Rejected: <alternative considered> | <reason for rejection>
+Confidence: <low|medium|high>
+Scope-risk: <narrow|moderate|broad>
+Directive: <forward-looking warning for future modifiers>
+Tested: <what was verified (unit, integration, manual)>
+Not-tested: <known gaps in verification>
+```
+
+### Rules
+
+1. **Intent line first.** The first line describes *why*, not *what*. The diff already shows what changed.
+2. **Trailers are optional but encouraged.** Use the ones that add value; skip the ones that don't.
+3. **`Rejected:` prevents re-exploration.** If you considered and rejected an alternative, record it so future agents don't waste cycles re-discovering the same dead end.
+4. **`Directive:` is a message to the future.** Use it for "do not change X without checking Y" warnings.
+5. **`Constraint:` captures external forces.** API limitations, policy requirements, upstream bugs — things not visible in the code.
+6. **`Not-tested:` is honest.** Declaring known verification gaps is more valuable than pretending everything is covered.
+7. **All trailers use git-native trailer format** (key-value after a blank line). No custom parsing required.
+
+### Example
+
+```
+Prevent silent session drops during long-running operations
+
+The auth service returns inconsistent status codes on token
+expiry, so the interceptor catches all 4xx responses and
+triggers an inline refresh.
+
+Constraint: Auth service does not support token introspection
+Constraint: Must not add latency to non-expired-token paths
+Rejected: Extend token TTL to 24h | security policy violation
+Rejected: Background refresh on timer | race condition with concurrent requests
+Confidence: high
+Scope-risk: narrow
+Directive: Error handling is intentionally broad (all 4xx) — do not narrow without verifying upstream behavior
+Tested: Single expired token refresh (unit)
+Not-tested: Auth service cold-start > 500ms behavior
+```
+
+### Trailer Vocabulary
+
+| Trailer | Purpose |
+|---------|---------|
+| `Constraint:` | External constraint that shaped the decision |
+| `Rejected:` | Alternative considered and why it was rejected |
+| `Confidence:` | Author's confidence level (low/medium/high) |
+| `Scope-risk:` | How broadly the change affects the system (narrow/moderate/broad) |
+| `Reversibility:` | How easily the change can be undone (clean/messy/irreversible) |
+| `Directive:` | Forward-looking instruction for future modifiers |
+| `Tested:` | What verification was performed |
+| `Not-tested:` | Known gaps in verification |
+| `Related:` | Links to related commits, issues, or decisions |
+
+Teams may introduce domain-specific trailers without breaking compatibility.
+</lore_commit_protocol>
+
 ---
 
 <delegation_rules>
@@ -98,8 +167,9 @@ Rules:
 </child_agent_protocol>
 
 <invocation_conventions>
-- `$name` — invoke a workflow skill or role keyword
+- `$name` — invoke a workflow skill
 - `/skills` — browse available skills
+- `/prompts:name` — advanced specialist role surface when the task already needs a specific agent
 </invocation_conventions>
 
 <model_routing>
@@ -122,7 +192,7 @@ Key roles:
 - `executor` — implementation and refactoring
 - `verifier` — completion evidence and validation
 
-Specialists remain available through skill/keyword routing when the task clearly benefits from them.
+Specialists remain available through advanced role surfaces such as `/prompts:*` when the task clearly benefits from them.
 </agent_catalog>
 
 ---
@@ -136,19 +206,26 @@ The `deep-interview` skill is the Socratic deep interview workflow and includes 
 
 | Keyword(s) | Skill | Action |
 |-------------|-------|--------|
-| "ralph", "don't stop", "must complete", "keep going" | `$ralph` | Read `./.codex/skills/ralph/SKILL.md`, execute persistence loop |
-| "autopilot", "build me", "I want a" | `$autopilot` | Read `./.codex/skills/autopilot/SKILL.md`, execute autonomous pipeline |
-| "ultrawork", "ulw", "parallel" | `$ultrawork` | Read `./.codex/skills/ultrawork/SKILL.md`, execute parallel agents |
-| "ultraqa" | `$ultraqa` | Read `./.codex/skills/ultraqa/SKILL.md`, run QA cycling workflow |
-| "analyze", "investigate" | `$analyze` | Read `./.codex/skills/analyze/SKILL.md`, run deep analysis |
+Runtime availability gate:
+- Treat `autopilot`, `ralph`, `ultrawork`, `ultraqa`, `team`/`swarm`, and `ecomode` as **OMX runtime workflows**, not generic prompt aliases.
+- Auto-activate those runtime workflows only when the current session is actually running under OMX CLI/runtime (for example, launched via `omx`, with OMX session overlay/runtime state available, or when the user explicitly asks to run `omx ...` in the shell).
+- In Codex App or plain Codex sessions without OMX runtime, do **not** treat those keywords alone as activation. Explain that they require OMX CLI runtime support, and continue with the nearest App-safe surface (`deep-interview`, `ralplan`, `plan`, `/prompts:*`, or native subagents) unless the user explicitly wants you to launch OMX from the shell.
+
+| Keyword(s) | Skill | Action |
+|-------------|-------|--------|
+| "ralph", "don't stop", "must complete", "keep going" | `$ralph` | Runtime-only: read `./.codex/skills/ralph/SKILL.md`, execute persistence loop only inside OMX CLI/runtime |
+| "autopilot", "build me", "I want a" | `$autopilot` | Runtime-only: read `./.codex/skills/autopilot/SKILL.md`, execute autonomous pipeline only inside OMX CLI/runtime |
+| "ultrawork", "ulw", "parallel" | `$ultrawork` | Runtime-only: read `./.codex/skills/ultrawork/SKILL.md`, execute parallel agents only inside OMX CLI/runtime |
+| "ultraqa" | `$ultraqa` | Runtime-only: read `./.codex/skills/ralph/SKILL.md`, run persistent completion and verification loop only inside OMX CLI/runtime (UltraQA compatibility alias) |
+| "analyze", "investigate" | `$analyze` | Read `./.codex/prompts/debugger.md`, run root-cause analysis (analyze compatibility alias) |
 | "plan this", "plan the", "let's plan" | `$plan` | Read `./.codex/skills/plan/SKILL.md`, start planning workflow |
 | "interview", "deep interview", "gather requirements", "interview me", "don't assume", "ouroboros" | `$deep-interview` | Read `./.codex/skills/deep-interview/SKILL.md`, run Ouroboros-inspired Socratic ambiguity-gated interview workflow |
 | "ralplan", "consensus plan" | `$ralplan` | Read `./.codex/skills/ralplan/SKILL.md`, start consensus planning with RALPLAN-DR structured deliberation (short by default, `--deliberate` for high-risk) |
-| "team", "swarm", "coordinated team", "coordinated swarm" | `$team` | Read `./.codex/skills/team/SKILL.md`, start team orchestration (swarm compatibility alias) |
-| "ecomode", "eco", "budget" | `$ecomode` | Read `./.codex/skills/ecomode/SKILL.md`, enable token-efficient mode |
+| "team", "swarm", "coordinated team", "coordinated swarm" | `$team` | Runtime-only: read `./.codex/skills/team/SKILL.md`, start tmux-based team orchestration only inside OMX CLI/runtime (swarm compatibility alias) |
+| "ecomode", "eco", "budget" | `$ecomode` | Runtime-only: read `./.codex/skills/ultrawork/SKILL.md`, execute cost-aware parallel workflow only inside OMX CLI/runtime (ecomode compatibility alias) |
 | "cancel", "stop", "abort" | `$cancel` | Read `./.codex/skills/cancel/SKILL.md`, cancel active modes |
-| "tdd", "test first" | `$tdd` | Read `./.codex/skills/tdd/SKILL.md`, start test-driven workflow |
-| "fix build", "type errors" | `$build-fix` | Read `./.codex/skills/build-fix/SKILL.md`, fix build errors |
+| "tdd", "test first" | `$tdd` | Read `./.codex/prompts/test-engineer.md`, run test-first workflow (tdd compatibility alias) |
+| "fix build", "type errors" | `$build-fix` | Read `./.codex/prompts/build-fixer.md`, fix build errors with minimal diff (build-fix compatibility alias) |
 | "review code", "code review", "code-review" | `$code-review` | Read `./.codex/skills/code-review/SKILL.md`, run code review |
 | "security review" | `$security-review` | Read `./.codex/skills/security-review/SKILL.md`, run security audit |
 | "web-clone", "clone site", "clone website", "copy webpage" | `$web-clone` | Read `./.codex/skills/web-clone/SKILL.md`, start website cloning pipeline |
@@ -157,7 +234,8 @@ Detection rules:
 - Keywords are case-insensitive and match anywhere in the user message.
 - Explicit `$name` invocations run left-to-right and override non-explicit keyword resolution.
 - If multiple non-explicit keywords match, use the most specific match.
-- If the user explicitly invokes `$name`, run those explicit invocations left-to-right before considering non-explicit keyword routing.
+- Runtime-only keywords must pass the runtime availability gate before activation.
+- If the user explicitly invokes `/prompts:<name>`, do not auto-activate keyword skills unless explicit `$name` tokens are also present.
 - The rest of the user message becomes the task description.
 
 Ralph / Ralplan execution gate:
@@ -205,7 +283,45 @@ Do not guess frontier/spark defaults from model-family recency; use `OMX_DEFAULT
 </team_model_resolution>
 
 <!-- OMX:MODELS:START -->
-<!-- Auto-generated by omx setup -->
+## Model Capability Table
+
+Auto-generated by `omx setup` from the current `config.toml` plus OMX model overrides.
+
+| Role | Model | Reasoning Effort | Use Case |
+| --- | --- | --- | --- |
+| Frontier (leader) | `gpt-5.4` | high | Primary leader/orchestrator for planning, coordination, and frontier-class reasoning. |
+| Spark (explorer/fast) | `gpt-5.3-codex-spark` | low | Fast triage, explore, lightweight synthesis, and low-latency routing. |
+| Standard (subagent default) | `gpt-5.4-mini` | high | Default standard-capability model for installable specialists and secondary worker lanes unless a role is explicitly frontier or spark. |
+| `explore` | `gpt-5.3-codex-spark` | low | Fast codebase search and file/symbol mapping (fast-lane, fast) |
+| `analyst` | `gpt-5.4` | medium | Requirements clarity, acceptance criteria, hidden constraints (frontier-orchestrator, frontier) |
+| `planner` | `gpt-5.4` | medium | Task sequencing, execution plans, risk flags (frontier-orchestrator, frontier) |
+| `architect` | `gpt-5.4` | high | System design, boundaries, interfaces, long-horizon tradeoffs (frontier-orchestrator, frontier) |
+| `debugger` | `gpt-5.4-mini` | high | Root-cause analysis, regression isolation, failure diagnosis (deep-worker, standard) |
+| `executor` | `gpt-5.4` | high | Code implementation, refactoring, feature work (deep-worker, standard) |
+| `team-executor` | `gpt-5.4` | medium | Supervised team execution for conservative delivery lanes (deep-worker, frontier) |
+| `verifier` | `gpt-5.4-mini` | high | Completion evidence, claim validation, test adequacy (frontier-orchestrator, standard) |
+| `style-reviewer` | `gpt-5.3-codex-spark` | low | Formatting, naming, idioms, lint conventions (fast-lane, fast) |
+| `quality-reviewer` | `gpt-5.4-mini` | medium | Logic defects, maintainability, anti-patterns (frontier-orchestrator, standard) |
+| `api-reviewer` | `gpt-5.4-mini` | medium | API contracts, versioning, backward compatibility (frontier-orchestrator, standard) |
+| `security-reviewer` | `gpt-5.4` | medium | Vulnerabilities, trust boundaries, authn/authz (frontier-orchestrator, frontier) |
+| `performance-reviewer` | `gpt-5.4-mini` | medium | Hotspots, complexity, memory/latency optimization (frontier-orchestrator, standard) |
+| `code-reviewer` | `gpt-5.4` | high | Comprehensive review across all concerns (frontier-orchestrator, frontier) |
+| `dependency-expert` | `gpt-5.4-mini` | high | External SDK/API/package evaluation (frontier-orchestrator, standard) |
+| `test-engineer` | `gpt-5.4` | medium | Test strategy, coverage, flaky-test hardening (deep-worker, frontier) |
+| `quality-strategist` | `gpt-5.4-mini` | medium | Quality strategy, release readiness, risk assessment (frontier-orchestrator, standard) |
+| `build-fixer` | `gpt-5.4-mini` | high | Build/toolchain/type failures resolution (deep-worker, standard) |
+| `designer` | `gpt-5.4-mini` | high | UX/UI architecture, interaction design (deep-worker, standard) |
+| `writer` | `gpt-5.4-mini` | high | Documentation, migration notes, user guidance (fast-lane, standard) |
+| `qa-tester` | `gpt-5.4-mini` | low | Interactive CLI/service runtime validation (deep-worker, standard) |
+| `git-master` | `gpt-5.4-mini` | high | Commit strategy, history hygiene, rebasing (deep-worker, standard) |
+| `code-simplifier` | `gpt-5.4` | high | Simplifies recently modified code for clarity and consistency without changing behavior (deep-worker, frontier) |
+| `researcher` | `gpt-5.4-mini` | high | External documentation and reference research (fast-lane, standard) |
+| `product-manager` | `gpt-5.4-mini` | medium | Problem framing, personas/JTBD, PRDs (frontier-orchestrator, standard) |
+| `ux-researcher` | `gpt-5.4-mini` | medium | Heuristic audits, usability, accessibility (frontier-orchestrator, standard) |
+| `information-architect` | `gpt-5.4-mini` | low | Taxonomy, navigation, findability (frontier-orchestrator, standard) |
+| `product-analyst` | `gpt-5.4-mini` | low | Product metrics, funnel analysis, experiments (frontier-orchestrator, standard) |
+| `critic` | `gpt-5.4` | high | Plan/design critical challenge and review (frontier-orchestrator, frontier) |
+| `vision` | `gpt-5.4` | low | Image/screenshot/diagram analysis (fast-lane, frontier) |
 <!-- OMX:MODELS:END -->
 
 ---

@@ -86,10 +86,10 @@ omx help
 
 OMX는 이제 플러그인 스캐폴딩 및 검증을 위한 `omx hooks`를 포함합니다.
 
-- `omx tmux-hook`은 계속 지원되며 변경되지 않았습니다.
-- `omx hooks`는 추가적이며 tmux-hook 워크플로우를 대체하지 않습니다.
+- 비팀 세션은 이제 native-hook-first입니다.
+- `omx tmux-hook`은 팀 런타임과 레거시 tmux 문제 해결용으로만 남습니다.
 - 플러그인 파일은 `.omx/hooks/*.mjs`에 위치합니다.
-- 플러그인은 기본적으로 비활성화되어 있으며; `OMX_HOOK_PLUGINS=1`로 활성화합니다.
+- 플러그인은 기본적으로 활성화되며 `OMX_HOOK_PLUGINS=0`으로 비활성화합니다.
 
 전체 확장 워크플로우 및 이벤트 모델은 `docs/hooks-extension.md`를 참조하세요.
 

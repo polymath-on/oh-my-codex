@@ -86,10 +86,10 @@ omx help
 
 OMX 现在包含用于插件脚手架和验证的 `omx hooks`。
 
-- `omx tmux-hook` 继续支持且未更改。
-- `omx hooks` 是附加的，不会替代 tmux-hook 工作流。
+- 非 team 会话现在采用 native-hook-first。
+- `omx tmux-hook` 仅保留给 team runtime 和旧版 tmux 故障排查。
 - 插件文件位于 `.omx/hooks/*.mjs`。
-- 插件默认关闭；使用 `OMX_HOOK_PLUGINS=1` 启用。
+- 插件默认开启；使用 `OMX_HOOK_PLUGINS=0` 禁用。
 
 完整的扩展工作流和事件模型请参阅 `docs/hooks-extension.md`。
 

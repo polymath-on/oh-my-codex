@@ -85,10 +85,10 @@ omx help
 
 OMX ora include `omx hooks` per lo scaffolding e la validazione dei plugin.
 
-- `omx tmux-hook` resta supportato e invariato.
-- `omx hooks` è additivo e non sostituisce i workflow tmux-hook.
+- Le sessioni non-team ora sono native-hook-first.
+- `omx tmux-hook` è riservato al runtime team e al troubleshooting tmux legacy.
 - I file dei plugin si trovano in `.omx/hooks/*.mjs`.
-- I plugin sono disattivati per impostazione predefinita; abilitali con `OMX_HOOK_PLUGINS=1`.
+- I plugin sono abilitati per impostazione predefinita; disabilitali con `OMX_HOOK_PLUGINS=0`.
 
 Consulta `docs/hooks-extension.md` per il workflow completo di estensione e il modello degli eventi.
 

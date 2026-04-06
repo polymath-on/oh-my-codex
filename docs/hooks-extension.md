@@ -1,9 +1,10 @@
 # Hooks Extension (Custom Plugins)
 
-OMX supports an additive hooks extension point for user plugins under `.omx/hooks/*.mjs`.
+OMX uses Codex native hooks for non-team automation and exposes a plugin extension point for
+user plugins under `.omx/hooks/*.mjs`.
 
-> Compatibility guarantee: `omx tmux-hook` remains fully supported and unchanged.
-> The new `omx hooks` command group is additive and does **not** replace tmux-hook workflows.
+> Non-team sessions are native-hook-first.
+> `omx tmux-hook` is reserved for team runtime behavior and legacy tmux troubleshooting.
 
 ## Quick start
 
@@ -17,6 +18,26 @@ omx hooks test
 This creates a scaffold plugin at:
 
 - `.omx/hooks/sample-plugin.mjs`
+
+## Ownership and precedence
+
+OMX treats hook ownership as a split contract:
+
+- **Repo-local native hooks** — OMX owns the repo-local Codex hook entries it installs for
+  non-team automation. These are the entries that power lifecycle/tool-adjacent behavior after the
+  migration.
+- **User/global native hooks** — existing user-managed Codex hooks remain user-managed. OMX should
+  merge around unrelated entries rather than claiming the whole file.
+- **tmux injection** — retained for team runtime paths and explicit legacy troubleshooting only; it
+  is no longer the default non-team follow-on mechanism.
+
+Operationally, that means:
+
+- `omx setup` is expected to force-enable `[features].codex_hooks = true` in supported scopes.
+- Unsupported or disabled native-hook runtimes must surface explicit setup/doctor status instead of
+  silently falling back to non-team tmux injection.
+- Team runtime tmux coordination remains in place unless a team-specific migration is documented
+  separately.
 
 ## Enablement model
 
@@ -36,7 +57,10 @@ export OMX_HOOK_PLUGIN_TIMEOUT_MS=1500
 
 ## Native event pipeline (v1)
 
-Native events are emitted from existing lifecycle/notify paths:
+For non-team sessions, OMX emits plugin events from the native Codex hook pipeline. Team sessions
+continue to preserve their existing tmux-oriented runtime flow.
+
+Current native events are emitted from existing lifecycle/notify paths:
 
 - `session-start`
 - `session-end`
@@ -106,7 +130,7 @@ repo-root `.omx/state/*.json` runtime files for the current workspace.
 
 Compatibility notes:
 
-- `omx tmux-hook` remains a CLI/runtime workflow, not `sdk.omx.tmuxHook.*`
+- `omx tmux-hook` remains a team-runtime / legacy CLI workflow, not `sdk.omx.tmuxHook.*`
 - pass one does not add `sdk.omx.tmuxHook.*`; tmux plugin behavior stays on `sdk.tmux.sendKeys(...)`
 - pass one does not add generic `sdk.omx.readJson(...)`, `sdk.omx.list()`, or `sdk.omx.exists()`
 - pass one does not add `sdk.pluginState`; keep using `sdk.state`

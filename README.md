@@ -178,6 +178,19 @@ omx sparkshell git status
 omx sparkshell --tmux-pane %12 --tail-lines 400
 ```
 
+### Native hooks ownership
+
+For non-team sessions, OMX is now native-hook-first:
+
+- `omx setup` is expected to enable Codex native hooks (`[features].codex_hooks = true`) in
+  supported scopes.
+- repo-local Codex hook entries are the canonical non-team automation surface
+- `omx tmux-hook` is reserved for team runtime behavior and legacy tmux troubleshooting
+- unsupported or disabled native-hook runtimes should report explicit setup/doctor status instead
+  of silently falling back to non-team tmux injection
+
+See [Hooks extension](./docs/hooks-extension.md) for the native-hook ownership and plugin contract.
+
 ### Platform notes for team mode
 
 `omx team` needs a tmux-compatible backend:

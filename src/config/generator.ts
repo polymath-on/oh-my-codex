@@ -183,6 +183,7 @@ function upsertFeatureFlags(config: string): string {
       "[features]",
       "multi_agent = true",
       "child_agents_md = true",
+      "codex_hooks = true",
       "",
     ].join("\n");
     if (base.length === 0) {
@@ -209,11 +210,14 @@ function upsertFeatureFlags(config: string): string {
 
   let multiAgentIdx = -1;
   let childAgentsIdx = -1;
+  let codexHooksIdx = -1;
   for (let i = featuresStart + 1; i < sectionEnd; i++) {
     if (/^\s*multi_agent\s*=/.test(lines[i])) {
       multiAgentIdx = i;
     } else if (/^\s*child_agents_md\s*=/.test(lines[i])) {
       childAgentsIdx = i;
+    } else if (/^\s*codex_hooks\s*=/.test(lines[i])) {
+      codexHooksIdx = i;
     }
   }
 
@@ -228,6 +232,13 @@ function upsertFeatureFlags(config: string): string {
     lines[childAgentsIdx] = "child_agents_md = true";
   } else {
     lines.splice(sectionEnd, 0, "child_agents_md = true");
+    sectionEnd += 1;
+  }
+
+  if (codexHooksIdx >= 0) {
+    lines[codexHooksIdx] = "codex_hooks = true";
+  } else {
+    lines.splice(sectionEnd, 0, "codex_hooks = true");
   }
 
   return lines.join("\n");
@@ -342,7 +353,7 @@ export function stripOmxFeatureFlags(config: string): string {
     }
   }
 
-  const omxFlags = ["multi_agent", "child_agents_md", "collab"];
+  const omxFlags = ["multi_agent", "child_agents_md", "codex_hooks", "collab"];
   const filtered: string[] = [];
   for (let i = 0; i < lines.length; i++) {
     if (i > featuresStart && i < sectionEnd) {
@@ -783,7 +794,7 @@ function getOmxTablesBlock(pkgRoot: string, includeTui = true): string {
  *
  * Layout:
  *   1. OMX top-level keys (notify, model_reasoning_effort, developer_instructions)
- *   2. [features] with multi_agent + child_agents_md
+ *   2. [features] with multi_agent + child_agents_md + codex_hooks
  *   3. [env] with defaulted explore-routing opt-in
  *   4. … user sections …
  *   5. OMX [table] sections (mcp_servers, tui)
