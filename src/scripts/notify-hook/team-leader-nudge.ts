@@ -70,23 +70,61 @@ export function resolveWorkerTurnStallThresholdMs() {
   return 30_000;
 }
 
-function buildLeaderDecisionReminder(teamName) {
-  return 'Read worker messages, then choose by worker status: continue, steer, or shut down if done.';
-}
-
 function buildStatusCheckReminder(teamName) {
-  return buildLeaderDecisionReminder(teamName);
+  return `Next: check messages; keep orchestrating; if done, gracefully shut down: omx team shutdown ${teamName}.`;
 }
 
 function buildMailboxCheckReminder(teamName) {
-  return buildLeaderDecisionReminder(teamName);
+  return `Next: read messages; keep orchestrating; if done, gracefully shut down: omx team shutdown ${teamName}.`;
 }
 
 function buildWorkerStartEvidenceReminder(teamName, workerName) {
   return `Next: check ${workerName} msg/output, confirm task in omx team status ${teamName}, then reassign/nudge.`;
 }
 
-function buildLeaderActionGuidance(teamName) {
+function classifyLeaderActionState({
+  allWorkersIdle = false,
+  workerPanesAlive = false,
+  taskCounts = {},
+  teamProgressStalled = false,
+} = {}) {
+  const pending = Number.isFinite(taskCounts.pending) ? taskCounts.pending : 0;
+  const blocked = Number.isFinite(taskCounts.blocked) ? taskCounts.blocked : 0;
+  const inProgress = Number.isFinite(taskCounts.in_progress) ? taskCounts.in_progress : 0;
+  const tasksComplete = pending === 0 && blocked === 0 && inProgress === 0;
+  const pendingFollowUpTasks = allWorkersIdle && pending > 0 && blocked === 0 && inProgress === 0;
+  const blockedWaitingOnLeader = allWorkersIdle && blocked > 0 && pending === 0 && inProgress === 0;
+  const terminalWaitingOnLeader = allWorkersIdle && tasksComplete && workerPanesAlive;
+  const stalledWaitingOnLeader = blockedWaitingOnLeader || teamProgressStalled;
+
+  if (terminalWaitingOnLeader) return 'done_waiting_on_leader';
+  if (stalledWaitingOnLeader) return 'stuck_waiting_on_leader';
+  if (pendingFollowUpTasks) return 'still_actionable';
+  return 'still_actionable';
+}
+
+function buildLeaderActionGuidance(teamName, {
+  allWorkersIdle = false,
+  workerPanesAlive = false,
+  taskCounts = {},
+  leaderActionState = 'still_actionable',
+} = {}) {
+  const pending = Number.isFinite(taskCounts.pending) ? taskCounts.pending : 0;
+  const blocked = Number.isFinite(taskCounts.blocked) ? taskCounts.blocked : 0;
+  const inProgress = Number.isFinite(taskCounts.in_progress) ? taskCounts.in_progress : 0;
+  const pendingFollowUpTasks = allWorkersIdle && pending > 0 && blocked === 0 && inProgress === 0;
+
+  if (pendingFollowUpTasks) {
+    return workerPanesAlive
+      ? 'Next: assign the next follow-up task to this idle team.'
+      : 'Next: launch a new team for the next task set.';
+  }
+  if (leaderActionState === 'done_waiting_on_leader') {
+    return `Next: decide whether to reconcile/merge results or gracefully shut down: omx team shutdown ${teamName}.`;
+  }
+  if (leaderActionState === 'stuck_waiting_on_leader') {
+    return `Next: omx team status ${teamName}; read worker messages; unblock/reassign or shutdown.`;
+  }
   return buildStatusCheckReminder(teamName);
 }
 
