@@ -85,10 +85,10 @@ omx help
 
 OMX artık eklenti iskelesi ve doğrulaması için `omx hooks` içerir.
 
-- Team dışı oturumlar artık native-hook-first yaklaşımını kullanır.
-- `omx tmux-hook` team runtime ve eski tmux sorun giderme için ayrılmıştır.
+- `omx tmux-hook` desteklenmeye devam eder ve değişmemiştir.
+- `omx hooks` ek niteliktedir ve tmux-hook iş akışlarını değiştirmez.
 - Eklenti dosyaları `.omx/hooks/*.mjs` konumunda bulunur.
-- Eklentiler varsayılan olarak açıktır; `OMX_HOOK_PLUGINS=0` ile kapatın.
+- Eklentiler varsayılan olarak kapalıdır; `OMX_HOOK_PLUGINS=1` ile etkinleştirin.
 
 Tam uzantı iş akışı ve olay modeli için `docs/hooks-extension.md` dosyasına bakın.
 

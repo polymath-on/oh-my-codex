@@ -43,8 +43,6 @@ describe('hooksCommand', () => {
   it('reports plugins enabled by default in help output', async () => {
     const logs = await captureHooksCommand(['--help'], {});
     assert.match(logs.join('\n'), /Plugins are enabled by default\. Disable with OMX_HOOK_PLUGINS=0\./);
-    assert.match(logs.join('\n'), /Native Codex hook ownership now lives in `\.codex\/hooks\.json` and is managed by `omx setup`\./);
-    assert.match(logs.join('\n'), /This command manages OMX plugin extensions under `\.omx\/hooks\/\*\.mjs`; it does not own native Codex registration\./);
   });
 
   it('reports init output with the same enabled-by-default wording', async () => {

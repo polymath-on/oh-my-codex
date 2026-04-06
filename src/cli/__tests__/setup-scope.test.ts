@@ -213,7 +213,6 @@ describe("omx setup scope behavior", () => {
       assert.match(configToml, /^max_depth = 2$/m);
       assert.match(configToml, /^\[env\]$/m);
       assert.match(configToml, /^USE_OMX_EXPLORE_CMD = "1"$/m);
-      assert.match(configToml, /^codex_hooks = true$/m);
       const agentsMd = await readFile(agentsMdPath, "utf-8");
       assert.match(agentsMd, /prompts\/\*\.md/);
       assert.match(agentsMd, /\.\/\.codex\/skills/);
@@ -246,8 +245,6 @@ describe("omx setup scope behavior", () => {
       assert.equal(existsSync(join(home, ".codex", "skills")), true);
       assert.equal(existsSync(join(home, ".codex", "agents")), true);
       assert.equal(existsSync(join(home, ".codex", "AGENTS.md")), true);
-      const configToml = await readFile(join(home, ".codex", "config.toml"), "utf-8");
-      assert.match(configToml, /^codex_hooks = true$/m);
       assert.equal(existsSync(join(wd, ".omx", "setup-scope.json")), true);
       const persistedScope = JSON.parse(
         await readFile(join(wd, ".omx", "setup-scope.json"), "utf-8"),

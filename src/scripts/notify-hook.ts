@@ -36,6 +36,7 @@ import {
   readdir,
 } from './notify-hook/state-io.js';
 import { isLeaderStale, resolveLeaderStalenessThresholdMs, maybeNudgeTeamLeader } from './notify-hook/team-leader-nudge.js';
+import { drainPendingTeamDispatch } from './notify-hook/team-dispatch.js';
 import { handleTmuxInjection } from './notify-hook/tmux-injection.js';
 import { maybeAutoNudge, resolveNudgePaneTarget, isDeepInterviewStateActive } from './notify-hook/auto-nudge.js';
 import { isManagedOmxSession } from './notify-hook/managed-tmux.js';
@@ -487,6 +488,15 @@ async function main() {
   if (!isTeamWorker) {
     try {
       await handleTmuxInjection({ payload, cwd, stateDir, logsDir });
+    } catch {
+      // Non-critical
+    }
+  }
+
+  // 5.5. Opportunistic team dispatch drain (leader session only).
+  if (!isTeamWorker) {
+    try {
+      await drainPendingTeamDispatch({ cwd, stateDir, logsDir, maxPerTick: 5 } as any);
     } catch {
       // Non-critical
     }

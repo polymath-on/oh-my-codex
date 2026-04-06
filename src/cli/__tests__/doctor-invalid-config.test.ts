@@ -63,40 +63,4 @@ theme = "base16-ocean-light"
       await rm(wd, { recursive: true, force: true });
     }
   });
-
-  it('warns when OMX config is missing [features].codex_hooks = true', async () => {
-    const wd = await mkdtemp(join(tmpdir(), 'omx-doctor-invalid-config-'));
-    try {
-      const home = join(wd, 'home');
-      const codexDir = join(home, '.codex');
-      await mkdir(codexDir, { recursive: true });
-
-      await writeFile(
-        join(codexDir, 'config.toml'),
-        [
-          '# oh-my-codex top-level settings (must be before any [table])',
-          'notify = ["node", "/path/to/notify-hook.js"]',
-          'model_reasoning_effort = "high"',
-          'developer_instructions = "You have oh-my-codex installed."',
-          '',
-          '[features]',
-          'multi_agent = true',
-          'child_agents_md = true',
-          '',
-        ].join('\n'),
-      );
-
-      const res = runOmx(wd, ['doctor'], {
-        HOME: home,
-        CODEX_HOME: codexDir,
-      });
-
-      if (shouldSkipForSpawnPermissions(res.error)) return;
-
-      assert.equal(res.status, 0, res.stderr || res.stdout);
-      assert.match(res.stdout, /\[!!\] Config: .*codex_hooks = true/i);
-    } finally {
-      await rm(wd, { recursive: true, force: true });
-    }
-  });
 });

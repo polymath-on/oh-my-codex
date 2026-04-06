@@ -63,11 +63,6 @@ function assertSingleOmxBlock(toml: string): void {
     "[features] should appear once",
   );
   assert.equal(
-    count(toml, /^codex_hooks = true$/gm),
-    1,
-    "codex_hooks should appear once",
-  );
-  assert.equal(
     count(toml, /^notify\s*=/gm),
     1,
     "notify key should appear once",
@@ -101,7 +96,6 @@ describe("config generator idempotency (#384)", () => {
       assertSingleOmxBlock(toml);
       assert.match(toml, /^multi_agent = true$/m);
       assert.match(toml, /^child_agents_md = true$/m);
-      assert.match(toml, /^codex_hooks = true$/m);
     } finally {
       await rm(wd, { recursive: true, force: true });
     }

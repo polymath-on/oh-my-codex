@@ -583,32 +583,8 @@ async function checkConfig(configPath: string): Promise<Check> {
       };
     }
 
-    const parsed = parseToml(content) as {
-      features?: Record<string, unknown>;
-    };
     const hasOmx = content.includes('omx_') || content.includes('oh-my-codex');
-    const codexHooksEnabled = parsed?.features?.codex_hooks === true;
-    if (hasOmx && !codexHooksEnabled) {
-      return {
-        name: 'Config',
-        status: 'warn',
-        message: 'config.toml has OMX entries but is missing [features].codex_hooks = true',
-      };
-    }
-
     if (hasOmx) {
-      try {
-        const parsed = parseToml(content) as { features?: Record<string, unknown> };
-        if (parsed?.features?.codex_hooks !== true) {
-          return {
-            name: 'Config',
-            status: 'warn',
-            message: 'config.toml has OMX entries but [features].codex_hooks = true is missing',
-          };
-        }
-      } catch {
-        // ignore parsed-feature inspection failures here; validateToml already passed
-      }
       return { name: 'Config', status: 'pass', message: 'config.toml has OMX entries' };
     }
 

@@ -52,13 +52,6 @@ import {
   upsertAgentsModelTable,
 } from "../utils/agents-model-table.js";
 import { spawnPlatformCommandSync } from "../utils/platform-command.js";
-import {
-  buildManagedNativeHooksFile,
-  codexHooksFilePath,
-  mergeManagedNativeHooks,
-  parseNativeHooksFile,
-  serializeNativeHooksFile,
-} from "../hooks/native-hooks-config.js";
 
 interface SetupOptions {
   codexVersionProbe?: () => string | null;
@@ -963,14 +956,8 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   }
   console.log();
 
-  // Step 7: Set up native Codex hooks + notify bridge
-  console.log("[7/8] Configuring native hooks + notification hook...");
-  await setupNativeHooksConfig(
-    pkgRoot,
-    resolvedScope.scope,
-    projectRoot,
-    { dryRun, verbose },
-  );
+  // Step 7: Set up notify hook
+  console.log("[7/8] Configuring notification hook...");
   await setupNotifyHook(pkgRoot, { dryRun, verbose });
   console.log("  Done.\n");
 
@@ -1682,45 +1669,6 @@ async function setupNotifyHook(
   }
   // The notify hook is configured in config.toml via mergeConfig
   if (options.verbose) console.log(`  Notify hook: ${hookScript}`);
-}
-
-async function setupNativeHooksConfig(
-  pkgRoot: string,
-  scope: SetupScope,
-  projectRoot: string,
-  options: Pick<SetupOptions, "dryRun" | "verbose">,
-): Promise<void> {
-  if (process.platform === "win32") {
-    console.log(
-      "  Native Codex hooks are currently unsupported on Windows; skipped hooks.json installation.",
-    );
-    return;
-  }
-
-  const hooksPath = codexHooksFilePath(scope, projectRoot);
-  const hooksDir = dirname(hooksPath);
-  const managedHooks = buildManagedNativeHooksFile(pkgRoot, scope);
-
-  let merged = managedHooks;
-  if (existsSync(hooksPath)) {
-    const existingRaw = await readFile(hooksPath, "utf-8");
-    merged = mergeManagedNativeHooks(parseNativeHooksFile(existingRaw), managedHooks);
-  }
-
-  const serialized = serializeNativeHooksFile(merged);
-  await mkdir(hooksDir, { recursive: true });
-  if (!options.dryRun) {
-    await writeFile(hooksPath, serialized);
-  }
-
-  console.log(
-    `  ${options.dryRun ? "Would update" : "Updated"} native hooks config: ${hooksPath}`,
-  );
-  console.log(
-    scope === "project"
-      ? "  OMX owns repo-local .codex/hooks.json entries and preserves non-OMX groups in the same file."
-      : "  OMX owns user-scope ~/.codex/hooks.json entries and preserves non-OMX groups in the same file.",
-  );
 }
 
 async function verifyTeamCliApiInterop(

@@ -45,7 +45,7 @@ interface InitConfigResult {
 const DEFAULT_CONFIG: TmuxHookConfig = {
   enabled: true,
   target: { type: 'pane', value: '' },
-  allowed_modes: ['team'],
+  allowed_modes: ['ralph', 'ultrawork', 'team'],
   cooldown_ms: 15000,
   max_injections_per_session: 200,
   prompt_template: 'Continue from current mode state. [OMX_TMUX_INJECT]',
@@ -57,25 +57,13 @@ const DEFAULT_CONFIG: TmuxHookConfig = {
 
 const HELP = `
 Usage:
-  omx tmux-hook init       Create team-runtime .omx/tmux-hook.json
+  omx tmux-hook init       Create .omx/tmux-hook.json
   omx tmux-hook status     Show config + runtime state summary
   omx tmux-hook validate   Validate config and tmux target reachability
   omx tmux-hook test       Run a synthetic notify-hook turn (end-to-end)
-
-Notes:
-  - Team runtime / legacy workflow only.
-  - Non-team tmux-hook usage is deprecated. Native Codex hooks in .codex/hooks.json now own non-team automation.
-  - This command remains for team-runtime / legacy tmux injection workflows only.
 `;
 
-function printTmuxHookDeprecationNotice(): void {
-  console.warn(
-    '[omx] Non-team tmux-hook usage is deprecated; native Codex hooks now own non-team automation. This command remains for team-runtime / legacy tmux injection workflows.',
-  );
-}
-
 export async function tmuxHookCommand(args: string[]): Promise<void> {
-  printTmuxHookDeprecationNotice();
   const subcommand = args[0] || 'status';
   switch (subcommand) {
     case 'init':

@@ -185,7 +185,7 @@ describe('notify-hook leader-side authority handoff', () => {
       assert.equal(result.status, 0, `notify-hook failed: ${result.stderr || result.stdout}`);
 
       const request = await readDispatchRequest('handoff-dispatch', queued.request.request_id, cwd);
-      assert.equal(request?.status, 'pending');
+      assert.equal(request?.status, 'failed');
     });
   });
 
