@@ -1240,6 +1240,15 @@ exit 1
       const compat = JSON.parse(await readFile(compatPath, 'utf8')) as { records: Array<{ message_id: string; body: string }> };
       const compatRecord = compat.records.find((entry) => entry.message_id === message.message_id);
       assert.ok(compatRecord);
+
+      const runtimeLogBefore = await readFile(runtimeLogPath, 'utf8');
+      const deliveredCallsBefore = runtimeLogBefore.split('MarkMailboxDelivered').length - 1;
+      const deliveredAgain = await markMessageDelivered('team-mailbox-bridge-authority', 'worker-2', message.message_id, cwd);
+      assert.equal(deliveredAgain, true, 'already-delivered bridge message should be treated as delivered');
+      const runtimeLogAfter = await readFile(runtimeLogPath, 'utf8');
+      const deliveredCallsAfter = runtimeLogAfter.split('MarkMailboxDelivered').length - 1;
+      assert.equal(deliveredCallsAfter, deliveredCallsBefore, 'idempotent delivered calls should not invoke bridge a second time');
+
       compatRecord!.body = '';
       await writeFile(compatPath, JSON.stringify(compat, null, 2));
 

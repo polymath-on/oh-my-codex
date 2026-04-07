@@ -187,6 +187,11 @@ export async function markMessageDelivered(
   messageId: string,
   deps: MailboxDeps,
 ): Promise<boolean> {
+  const existingMailbox = await deps.readMailbox(deps.teamName, workerName, deps.cwd);
+  const existingMessage = existingMailbox.messages.find((message) => message.message_id === messageId);
+  if (!existingMessage) return false;
+  if (existingMessage.delivered_at) return true;
+
   if (executeBridgeCommand(deps.cwd, { command: 'MarkMailboxDelivered', message_id: messageId })) {
     const updated = await deps.withMailboxLock(deps.teamName, workerName, deps.cwd, async () => {
       const mailbox = await deps.readMailbox(deps.teamName, workerName, deps.cwd);
