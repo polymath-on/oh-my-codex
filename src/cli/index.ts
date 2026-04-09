@@ -80,6 +80,14 @@ import { getPackageRoot } from "../utils/package.js";
 import { codexConfigPath, rememberOmxLaunchContext, resolveOmxEntryPath } from "../utils/paths.js";
 import { repairConfigIfNeeded } from "../config/generator.js";
 import { HUD_TMUX_HEIGHT_LINES } from "../hud/constants.js";
+import {
+  createHudWatchPane as createSharedHudWatchPane,
+  killTmuxPane as killSharedTmuxPane,
+  listCurrentWindowHudPaneIds,
+  parsePaneIdFromTmuxOutput,
+} from "../hud/tmux.js";
+
+export { parseTmuxPaneSnapshot, isHudWatchPane, findHudWatchPaneIds } from "../hud/tmux.js";
 
 rememberOmxLaunchContext();
 import {
@@ -566,51 +574,9 @@ function runCodexBlocking(
   }
 }
 
-interface TmuxPaneSnapshot {
-  paneId: string;
-  currentCommand: string;
-  startCommand: string;
-}
-
 export interface DetachedSessionTmuxStep {
   name: string;
   args: string[];
-}
-
-export function parseTmuxPaneSnapshot(output: string): TmuxPaneSnapshot[] {
-  return output
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [paneId = "", currentCommand = "", ...startCommandParts] =
-        line.split("\t");
-      return {
-        paneId: paneId.trim(),
-        currentCommand: currentCommand.trim(),
-        startCommand: startCommandParts.join("\t").trim(),
-      };
-    })
-    .filter((pane) => pane.paneId.startsWith("%"));
-}
-
-export function isHudWatchPane(pane: TmuxPaneSnapshot): boolean {
-  const command = `${pane.startCommand} ${pane.currentCommand}`.toLowerCase();
-  return (
-    /\bhud\b/.test(command) &&
-    /--watch\b/.test(command) &&
-    (/\bomx(?:\.js)?\b/.test(command) || /\bnode\b/.test(command))
-  );
-}
-
-export function findHudWatchPaneIds(
-  panes: TmuxPaneSnapshot[],
-  currentPaneId?: string,
-): string[] {
-  return panes
-    .filter((pane) => pane.paneId !== currentPaneId)
-    .filter((pane) => isHudWatchPane(pane))
-    .map((pane) => pane.paneId);
 }
 
 export function buildHudPaneCleanupTargets(
@@ -1423,8 +1389,12 @@ export function buildTmuxSessionName(cwd: string, sessionId: string): string {
   const branch = tryReadGitValue(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
   if (branch) branchToken = sanitizeTmuxToken(branch);
   const sessionToken = sanitizeTmuxToken(sessionId.replace(/^omx-/, ""));
-  const name = `omx-${dirToken}-${branchToken}-${sessionToken}`;
-  return name.length > 120 ? name.slice(0, 120) : name;
+  const prefix = `omx-${dirToken}-${branchToken}`;
+  const name = `${prefix}-${sessionToken}`;
+  if (name.length <= 120) return name;
+  const prefixBudget = Math.max(4, 120 - sessionToken.length - 1);
+  const trimmedPrefix = prefix.slice(0, prefixBudget).replace(/-+$/g, "");
+  return `${trimmedPrefix}-${sessionToken}`.slice(0, 120);
 }
 
 export function buildDetachedTmuxSessionName(
@@ -1432,11 +1402,6 @@ export function buildDetachedTmuxSessionName(
   sessionId: string,
 ): string {
   return buildTmuxSessionName(cwd, sessionId);
-}
-
-function parsePaneIdFromTmuxOutput(rawOutput: string): string | null {
-  const paneId = rawOutput.split("\n")[0]?.trim() || "";
-  return paneId.startsWith("%") ? paneId : null;
 }
 
 function parseWindowIndexFromTmuxOutput(rawOutput: string): string | null {
@@ -2500,16 +2465,7 @@ function runCodex(
 
 function listHudWatchPaneIdsInCurrentWindow(currentPaneId?: string): string[] {
   try {
-    const output = execFileSync(
-      "tmux",
-      [
-        "list-panes",
-        "-F",
-        "#{pane_id}\t#{pane_current_command}\t#{pane_start_command}",
-      ],
-      { encoding: "utf-8" },
-    );
-    return findHudWatchPaneIds(parseTmuxPaneSnapshot(output), currentPaneId);
+    return listCurrentWindowHudPaneIds(currentPaneId);
   } catch (err) {
     process.stderr.write(`[cli/index] operation failed: ${err}\n`);
     return [];
@@ -2517,30 +2473,13 @@ function listHudWatchPaneIdsInCurrentWindow(currentPaneId?: string): string[] {
 }
 
 function createHudWatchPane(cwd: string, hudCmd: string): string | null {
-  const output = execFileSync(
-    "tmux",
-    [
-      "split-window",
-      "-v",
-      "-l",
-      String(HUD_TMUX_HEIGHT_LINES),
-      "-d",
-      "-c",
-      cwd,
-      "-P",
-      "-F",
-      "#{pane_id}",
-      hudCmd,
-    ],
-    { encoding: "utf-8" },
-  );
-  return parsePaneIdFromTmuxOutput(output);
+  return createSharedHudWatchPane(cwd, hudCmd, { heightLines: HUD_TMUX_HEIGHT_LINES });
 }
 
 function killTmuxPane(paneId: string): void {
   if (!paneId.startsWith("%")) return;
   try {
-    execFileSync("tmux", ["kill-pane", "-t", paneId], { stdio: "ignore" });
+    killSharedTmuxPane(paneId);
   } catch (err) {
     process.stderr.write(`[cli/index] operation failed: ${err}\n`);
     // Pane may already be gone; ignore.

@@ -70,8 +70,12 @@ function buildTmuxSessionName(cwd: any, sessionId: any): string {
   const branch = gitValue(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']);
   const branchToken = branch ? sanitizeTmuxToken(branch) : 'detached';
   const sessionToken = sanitizeTmuxToken(safeString(sessionId).replace(/^omx-/, ''));
-  const name = `omx-${dirToken}-${branchToken}-${sessionToken}`;
-  return name.length > 120 ? name.slice(0, 120) : name;
+  const prefix = `omx-${dirToken}-${branchToken}`;
+  const name = `${prefix}-${sessionToken}`;
+  if (name.length <= 120) return name;
+  const prefixBudget = Math.max(4, 120 - sessionToken.length - 1);
+  const trimmedPrefix = prefix.slice(0, prefixBudget).replace(/-+$/g, '');
+  return `${trimmedPrefix}-${sessionToken}`.slice(0, 120);
 }
 
 export function resolveOperationalSessionName(cwd: any, sessionId = '', sessionName = ''): string | undefined {

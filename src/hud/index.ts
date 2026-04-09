@@ -13,7 +13,7 @@ import { execFileSync } from 'child_process';
 import { readAllState, readHudConfig } from './state.js';
 import { renderHud } from './render.js';
 import type { HudFlags, HudPreset, HudRenderContext, ResolvedHudConfig } from './types.js';
-import { HUD_TMUX_HEIGHT_LINES } from './constants.js';
+import { HUD_TMUX_HEIGHT_LINES, HUD_TMUX_MAX_HEIGHT_LINES } from './constants.js';
 import { sleep } from '../utils/sleep.js';
 import { runHudAuthorityTick } from './authority.js';
 import { resolveOmxEntryPath } from '../utils/paths.js';
@@ -61,7 +61,7 @@ interface RunWatchModeDependencies {
   env: NodeJS.ProcessEnv;
   readAllStateFn: (cwd: string, config?: ResolvedHudConfig) => Promise<HudRenderContext>;
   readHudConfigFn: (cwd: string) => Promise<ResolvedHudConfig>;
-  renderHudFn: (ctx: HudRenderContext, preset: HudPreset) => string;
+  renderHudFn: (ctx: HudRenderContext, preset: HudPreset, options?: { maxWidth?: number; maxLines?: number }) => string;
   runAuthorityTickFn: (options: { cwd: string }) => Promise<void>;
   writeStdout: (text: string) => void;
   writeStderr: (text: string) => void;
@@ -139,7 +139,10 @@ export async function runWatchMode(
       const config = await dependencies.readHudConfigFn(cwd);
       const ctx = await dependencies.readAllStateFn(cwd, config);
       const preset = flags.preset ?? config.preset;
-      const line = dependencies.renderHudFn(ctx, preset);
+      const line = dependencies.renderHudFn(ctx, preset, {
+        maxWidth: process.stdout.columns ?? undefined,
+        maxLines: HUD_TMUX_MAX_HEIGHT_LINES,
+      });
       dependencies.writeStdout(line + '\x1b[K\n\x1b[J');
       await dependencies.runAuthorityTickFn({ cwd });
     } catch (error) {
@@ -208,7 +211,10 @@ async function renderOnce(cwd: string, flags: HudFlags): Promise<void> {
     return;
   }
 
-  console.log(renderHud(ctx, preset));
+  console.log(renderHud(ctx, preset, {
+    maxWidth: process.stdout.columns ?? undefined,
+    maxLines: HUD_TMUX_MAX_HEIGHT_LINES,
+  }));
 }
 
 export async function hudCommand(args: string[]): Promise<void> {

@@ -6,12 +6,27 @@
 
 import type { HudRenderContext, HudPreset } from './types.js';
 import { green, yellow, cyan, dim, bold, getRalphColor, isColorEnabled, RESET } from './colors.js';
+import { HUD_TMUX_MAX_HEIGHT_LINES } from './constants.js';
 
 const SEP = dim(' | ');
 const CONTROL_CHARS_RE = /[\u0000-\u001f\u007f-\u009f]/g;
+const ANSI_SGR_RE = /\x1b\[[0-9;]*m/g;
+
+export interface RenderHudOptions {
+  maxWidth?: number;
+  maxLines?: number;
+}
 
 function sanitizeDynamicText(value: string): string {
   return value.replace(CONTROL_CHARS_RE, '');
+}
+
+function stripAnsi(value: string): string {
+  return value.replace(ANSI_SGR_RE, '');
+}
+
+function visibleLength(value: string): number {
+  return stripAnsi(value).length;
 }
 
 function formatTokenCount(value: number): string {
@@ -230,12 +245,89 @@ function getElements(preset: HudPreset): ElementRenderer[] {
   }
 }
 
+function ellipsizeSegment(segment: string, maxWidth: number): string {
+  if (!Number.isFinite(maxWidth) || maxWidth <= 0) return '';
+  if (visibleLength(segment) <= maxWidth) return segment;
+
+  const plain = stripAnsi(segment);
+  if (plain.length <= maxWidth) return plain;
+  if (maxWidth <= 1) return '…';
+  if (maxWidth <= 4) return `${plain.slice(0, Math.max(0, maxWidth - 1))}…`;
+
+  const head = Math.max(1, Math.ceil((maxWidth - 1) / 2));
+  const tail = Math.max(1, Math.floor((maxWidth - 1) / 2));
+  return `${plain.slice(0, head)}…${plain.slice(-tail)}`;
+}
+
+function wrapHudParts(
+  label: string,
+  parts: string[],
+  options: RenderHudOptions,
+): string {
+  const maxWidth = Number.isFinite(options.maxWidth) && (options.maxWidth ?? 0) > 0
+    ? Math.max(12, Math.floor(options.maxWidth ?? 0))
+    : Infinity;
+  const maxLines = Number.isFinite(options.maxLines) && (options.maxLines ?? 0) > 0
+    ? Math.max(1, Math.floor(options.maxLines ?? 0))
+    : HUD_TMUX_MAX_HEIGHT_LINES;
+
+  if (!Number.isFinite(maxWidth)) {
+    return `${label} ${parts.join(SEP)}`;
+  }
+
+  const lines: string[] = [];
+  const indent = ' '.repeat(Math.max(0, visibleLength(label) + 1));
+  let currentLine = label;
+  let hasContent = false;
+
+  const pushLine = () => {
+    lines.push(currentLine);
+    currentLine = indent;
+    hasContent = false;
+  };
+
+  for (const part of parts) {
+    const linePrefix = hasContent ? indent : `${label} `;
+    const available = Math.max(1, maxWidth - visibleLength(linePrefix));
+    const segment = ellipsizeSegment(part, available);
+    const separator = hasContent ? SEP : ' ';
+    const candidate = `${currentLine}${separator}${segment}`;
+    if (visibleLength(candidate) <= maxWidth) {
+      currentLine = candidate;
+      hasContent = true;
+      continue;
+    }
+
+    if (lines.length + 1 < maxLines) {
+      pushLine();
+      currentLine = `${currentLine}${segment}`;
+      hasContent = true;
+      continue;
+    }
+
+    const overflow = dim('…');
+    const overflowCandidate = `${currentLine}${hasContent ? SEP : ' '}${overflow}`;
+    currentLine = visibleLength(overflowCandidate) <= maxWidth
+      ? overflowCandidate
+      : ellipsizeSegment(currentLine, maxWidth - 1) + '…';
+    hasContent = true;
+    break;
+  }
+
+  lines.push(currentLine);
+  return lines.join('\n');
+}
+
 // ============================================================================
 // Main Render
 // ============================================================================
 
 /** Render the HUD statusline from context and preset */
-export function renderHud(ctx: HudRenderContext, preset: HudPreset): string {
+export function renderHud(
+  ctx: HudRenderContext,
+  preset: HudPreset,
+  options: RenderHudOptions = {},
+): string {
   const elements = getElements(preset);
   const parts = elements
     .map(fn => fn(ctx))
@@ -245,8 +337,12 @@ export function renderHud(ctx: HudRenderContext, preset: HudPreset): string {
   const label = bold(`[OMX${ver}]`);
 
   if (parts.length === 0) {
-    return label + ' ' + dim('No active modes.');
+    return wrapHudParts(label, [dim('No active modes.')], options);
   }
 
-  return label + ' ' + parts.join(SEP);
+  return wrapHudParts(label, parts, options);
+}
+
+export function countRenderedHudLines(text: string): number {
+  return text.replace(/\r/g, '').split('\n').length;
 }

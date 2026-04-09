@@ -599,6 +599,51 @@ describe('renderHud – separator', () => {
   });
 });
 
+describe('renderHud – wrapping', () => {
+  it('wraps long HUD output across multiple lines when width is constrained', () => {
+    const ctx = {
+      ...emptyCtx(),
+      gitBranch: 'feature/very-long-branch-name',
+      ralph: { active: true, iteration: 3, max_iterations: 10 },
+      ultrawork: { active: true },
+      metrics: { session_turns: 12, total_turns: 12, last_activity: new Date().toISOString() },
+      session: { session_id: 'sess-wrap-1', started_at: new Date().toISOString() },
+      hudNotify: { last_turn_at: new Date().toISOString(), turn_count: 12 },
+    };
+    const result = stripSgr(renderHud(ctx, 'focused', { maxWidth: 32, maxLines: 5 }));
+    assert.ok(result.includes('\n'));
+    assert.ok(result.split('\n').length <= 5);
+  });
+
+  it('caps wrapped HUD output at the requested max line count', () => {
+    const ctx = {
+      ...emptyCtx(),
+      gitBranch: 'feature/very-long-branch-name',
+      ralph: { active: true, iteration: 3, max_iterations: 10 },
+      ultrawork: { active: true },
+      autopilot: { active: true, current_phase: 'planning' },
+      ralplan: { active: true, current_phase: 'review' },
+      deepInterview: { active: true, current_phase: 'intent-first' },
+      autoresearch: { active: true, current_phase: 'running' },
+      ultraqa: { active: true, current_phase: 'diagnose' },
+      team: { active: true, agent_count: 3 },
+      metrics: {
+        session_turns: 12,
+        total_turns: 12,
+        last_activity: new Date().toISOString(),
+        session_total_tokens: 10_000,
+        five_hour_limit_pct: 80,
+        weekly_limit_pct: 40,
+      },
+      session: { session_id: 'sess-wrap-2', started_at: new Date().toISOString() },
+      hudNotify: { last_turn_at: new Date().toISOString(), turn_count: 12 },
+    };
+    const result = stripSgr(renderHud(ctx, 'full', { maxWidth: 22, maxLines: 3 }));
+    assert.equal(result.split('\n').length, 3);
+    assert.ok(result.includes('…'));
+  });
+});
+
 // ── Sanitization ─────────────────────────────────────────────────────────────
 
 describe('renderHud – sanitization', () => {
