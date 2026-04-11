@@ -120,8 +120,7 @@ function stateDirToProjectRoot(stateDir: string): string {
   return dirname(dirname(stateDir));
 }
 
-async function readLeaderBranchGitActivityMs(stateDir: string): Promise<number> {
-  const cwd = stateDirToProjectRoot(stateDir);
+export async function readBranchGitActivityMsForPath(cwd: string): Promise<number> {
   const gitDir = tryReadGitValue(cwd, ['rev-parse', '--git-dir']);
   if (!gitDir) return Number.NaN;
 
@@ -140,6 +139,10 @@ async function readLeaderBranchGitActivityMs(stateDir: string): Promise<number> 
 
   const candidates = [headLogMs, branchLogMs, headCommitMs].filter((ms) => Number.isFinite(ms));
   return candidates.length > 0 ? Math.max(...candidates) : Number.NaN;
+}
+
+async function readLeaderBranchGitActivityMs(stateDir: string): Promise<number> {
+  return await readBranchGitActivityMsForPath(stateDirToProjectRoot(stateDir));
 }
 
 export function leaderRuntimeActivityPath(cwd: string): string {

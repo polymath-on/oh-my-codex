@@ -1667,6 +1667,59 @@ describe('executeTeamApiOperation: read-stall-state', () => {
     }
   });
 
+  it('suppresses stale native-stop attention after newer detached worktree progress', async () => {
+    const { cwd, cleanup } = await setupTeam('stall-state-detached-progress');
+    try {
+      const workerWorktree = join(cwd, 'worktrees', 'worker-1');
+      await mkdir(join(workerWorktree, '.omx', 'state'), { recursive: true });
+
+      const manifest = await readTeamManifestV2('stall-state-detached-progress', cwd);
+      assert.ok(manifest);
+      await writeTeamManifestV2({
+        ...manifest!,
+        workers: (manifest!.workers ?? []).map((worker) => (
+          worker.name === 'worker-1'
+            ? { ...worker, worktree_path: workerWorktree }
+            : worker
+        )),
+      }, cwd);
+
+      await writeTeamLeaderAttention('stall-state-detached-progress', {
+        team_name: 'stall-state-detached-progress',
+        updated_at: '2026-03-10T10:05:00.000Z',
+        source: 'native_stop',
+        leader_decision_state: 'still_actionable',
+        leader_attention_pending: true,
+        leader_attention_reason: 'leader_session_stopped',
+        attention_reasons: ['leader_session_stopped'],
+        leader_stale: false,
+        leader_session_active: false,
+        leader_session_id: 'leader-session-1',
+        leader_session_stopped_at: '2026-03-10T10:05:00.000Z',
+        unread_leader_message_count: 0,
+        work_remaining: false,
+        stalled_for_ms: null,
+      }, cwd);
+      await writeFile(join(workerWorktree, '.omx', 'state', 'current-task-baseline.json'), JSON.stringify({
+        version: 1,
+        tasks: [],
+      }, null, 2));
+
+      const result = await executeTeamApiOperation('read-stall-state', {
+        team_name: 'stall-state-detached-progress',
+      }, cwd);
+
+      assert.equal(result.ok, true);
+      if (result.ok) {
+        assert.equal(result.data.leader_attention_pending, false);
+        assert.equal(result.data.leader_stale, false);
+        assert.doesNotMatch((result.data.reasons as string[]).join(' '), /leader_attention_pending:leader_session_stopped/);
+      }
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('marks only active leader-owned teams as stopped on session end', async () => {
     const { cwd, cleanup } = await setupTeam('owned-team');
     try {

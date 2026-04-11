@@ -138,6 +138,11 @@ import { formatNotification } from "./formatter.js";
 import { dispatchNotifications } from "./dispatcher.js";
 import { getCurrentTmuxSession, captureTmuxPane } from "./tmux.js";
 import { basename } from "path";
+import { omxStateDir } from "../utils/paths.js";
+import {
+  shouldSendLifecycleNotification,
+  recordLifecycleNotificationSent,
+} from "./lifecycle-dedupe.js";
 import type { OpenClawHookEvent } from "../openclaw/types.js";
 
 // Suppress unused import — used by callers via re-export
@@ -239,7 +244,19 @@ export async function notifyLifecycle(
 
     payload.message = data.message || formatNotification(payload);
 
+    const lifecycleStateDir = payload.projectPath ? omxStateDir(payload.projectPath) : "";
+    if (!shouldSendLifecycleNotification(lifecycleStateDir, payload)) {
+      return {
+        event,
+        anySuccess: true,
+        results: [],
+      };
+    }
+
     const result = await dispatchNotifications(config, event, payload);
+    if (result.anySuccess) {
+      recordLifecycleNotificationSent(lifecycleStateDir, payload);
+    }
 
     // Fire-and-forget OpenClaw gateway call
     const openClawEvent = toOpenClawEvent(event);

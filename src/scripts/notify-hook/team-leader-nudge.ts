@@ -22,6 +22,7 @@ import { DEFAULT_MARKER } from '../tmux-hook-engine.js';
 import { isLeaderRuntimeStale } from '../../team/leader-activity.js';
 import { appendTeamDeliveryLog } from '../../team/delivery-log.js';
 import { writeTeamLeaderAttention } from '../../team/state.js';
+import { readLatestTeamProgressEvidenceMs } from '../../team/progress-evidence.js';
 const LEADER_PANE_MISSING_NO_INJECTION_REASON = 'leader_pane_missing_no_injection';
 const LEADER_PANE_SHELL_NO_INJECTION_REASON = 'leader_pane_shell_no_injection';
 const LEADER_NOTIFICATION_DEFERRED_TYPE = 'leader_notification_deferred';
@@ -674,11 +675,15 @@ export async function maybeNudgeTeamLeader({
     const workerTurnProgress = hasWorkerTurnProgress(progressSnapshot.workerSnapshot, previousTurnCounts);
     const hasTrackableTurnSignals = hasTrackableActiveWorkerTurns(progressSnapshot.workerSnapshot, previousTurnCounts);
     const progressChanged = !previousSignature || previousSignature !== progressSnapshot.signature || workerTurnProgress;
+    const extraProgressEvidenceMs = await readLatestTeamProgressEvidenceMs(cwd, teamName).catch(() => Number.NaN);
     const effectiveProgressAtMs = progressChanged || !Number.isFinite(previousProgressAtMs)
       ? nowMs
       : previousProgressAtMs;
-    const effectiveProgressAtIso = new Date(effectiveProgressAtMs).toISOString();
-    const stalledForMs = Math.max(0, nowMs - effectiveProgressAtMs);
+    const latestProgressEvidenceMs = Number.isFinite(extraProgressEvidenceMs)
+      ? Math.max(effectiveProgressAtMs, extraProgressEvidenceMs)
+      : effectiveProgressAtMs;
+    const effectiveProgressAtIso = new Date(latestProgressEvidenceMs).toISOString();
+    const stalledForMs = Math.max(0, nowMs - latestProgressEvidenceMs);
     const stallThresholdMs = hasTrackableTurnSignals ? workerTurnStallThresholdMs : fallbackProgressStallThresholdMs;
     const teamProgressStalled =
       progressSnapshot.workRemaining
@@ -686,6 +691,9 @@ export async function maybeNudgeTeamLeader({
       && !allWorkersIdle
       && !progressChanged
       && stalledForMs >= stallThresholdMs;
+    const hasFreshProgressEvidence =
+      progressSnapshot.workRemaining
+      && stalledForMs < stallThresholdMs;
     const leaderActionState = classifyLeaderActionState({
       allWorkersIdle,
       workerPanesAlive: paneStatus.alive,
@@ -722,7 +730,7 @@ export async function maybeNudgeTeamLeader({
 
     // Stale-leader follow-up is the only periodic visible nudge path.
     // This keeps the leader pane quieter when the leader is not actually stale.
-    const stalePanesNudge = paneStatus.alive && leaderStale;
+    const stalePanesNudge = paneStatus.alive && leaderStale && !hasFreshProgressEvidence;
     const previousStalledTeamNudge = prevReason === 'stuck_waiting_on_leader';
     const stalledTeamNudge = teamProgressStalled && (dueByTime || !previousStalledTeamNudge);
     const staleFollowupDue = stalePanesNudge && dueByTime;

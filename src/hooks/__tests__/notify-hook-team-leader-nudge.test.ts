@@ -2538,6 +2538,108 @@ exit 0
     });
   });
 
+  it('suppresses stale leader follow-up when detached worktree progress is still fresh', async () => {
+    await withTempWorkingDir(async (cwd) => {
+      const omxDir = join(cwd, '.omx');
+      const stateDir = join(omxDir, 'state');
+      const logsDir = join(omxDir, 'logs');
+      const teamName = 'fresh-detached-progress';
+      const teamDir = join(stateDir, 'team', teamName);
+      const workersDir = join(teamDir, 'workers');
+      const tasksDir = join(teamDir, 'tasks');
+      const workerWorktree = join(cwd, 'worktrees', 'worker-1');
+      const fakeBinDir = join(cwd, 'fake-bin');
+      const fakeTmuxPath = join(fakeBinDir, 'tmux');
+      const tmuxLogPath = join(cwd, 'tmux.log');
+
+      await mkdir(logsDir, { recursive: true });
+      await mkdir(tasksDir, { recursive: true });
+      await mkdir(join(workersDir, 'worker-1'), { recursive: true });
+      await mkdir(join(workerWorktree, '.omx', 'state'), { recursive: true });
+      await mkdir(fakeBinDir, { recursive: true });
+
+      await writeJson(join(stateDir, 'team-state.json'), {
+        active: true,
+        team_name: teamName,
+        current_phase: 'team-exec',
+      });
+      await writeJson(join(teamDir, 'config.json'), {
+        name: teamName,
+        tmux_session: 'omx-team-fresh-detached-progress',
+        leader_pane_id: '%99',
+        workers: [
+          { name: 'worker-1', index: 1, pane_id: '%10', worktree_path: workerWorktree },
+        ],
+      });
+      await writeJson(join(stateDir, 'hud-state.json'), {
+        last_turn_at: new Date(Date.now() - 300_000).toISOString(),
+        turn_count: 5,
+      });
+      await writeJson(join(tasksDir, 'task-1.json'), {
+        id: '1',
+        subject: 'Apply detached fix',
+        description: 'keep going',
+        status: 'in_progress',
+        owner: 'worker-1',
+        created_at: new Date(Date.now() - 300_000).toISOString(),
+      });
+      await writeJson(join(workersDir, 'worker-1', 'status.json'), {
+        state: 'working',
+        current_task_id: '1',
+        updated_at: new Date(Date.now() - 300_000).toISOString(),
+      });
+      await writeJson(join(workersDir, 'worker-1', 'heartbeat.json'), {
+        last_turn_at: new Date(Date.now() - 300_000).toISOString(),
+        turn_count: 2,
+        alive: true,
+      });
+      await writeJson(join(stateDir, 'team-leader-nudge.json'), {
+        last_nudged_by_team: {
+          [teamName]: {
+            at: new Date(Date.now() - 60_000).toISOString(),
+            last_message_id: '',
+            reason: 'stale_leader_panes_alive',
+          },
+        },
+        progress_by_team: {
+          [teamName]: {
+            signature: JSON.stringify({
+              tasks: [{ id: '1', owner: 'worker-1', status: 'in_progress' }],
+              workers: [{
+                worker: 'worker-1',
+                state: 'working',
+                current_task_id: '1',
+                status_missing: false,
+                turn_count: 2,
+                heartbeat_missing: false,
+              }],
+            }),
+            last_progress_at: new Date(Date.now() - 300_000).toISOString(),
+          },
+        },
+      });
+      await writeJson(join(workerWorktree, '.omx', 'state', 'current-task-baseline.json'), {
+        version: 1,
+        tasks: [],
+      });
+
+      await writeFile(fakeTmuxPath, buildFakeTmuxWithListPanes(tmuxLogPath, ['%10 12345']));
+      await chmod(fakeTmuxPath, 0o755);
+
+      const result = runNotifyHook(cwd, fakeBinDir, {
+        OMX_TEAM_PROGRESS_STALL_MS: '60000',
+        OMX_TEAM_LEADER_NUDGE_MS: '30000',
+        OMX_TEAM_LEADER_STALE_MS: '60000',
+      });
+      assert.equal(result.status, 0, `notify-hook failed: ${result.stderr || result.stdout}`);
+
+      if (existsSync(tmuxLogPath)) {
+        const tmuxLog = await readFile(tmuxLogPath, 'utf-8');
+        assert.doesNotMatch(tmuxLog, /Team fresh-detached-progress: leader stale,/);
+      }
+    });
+  });
+
   it('emits team_leader_nudge event to events.ndjson when nudge fires', async () => {
     await withTempWorkingDir(async (cwd) => {
       const omxDir = join(cwd, '.omx');
