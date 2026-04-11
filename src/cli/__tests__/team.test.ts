@@ -381,6 +381,105 @@ describe('teamCommand shutdown --force parsing', () => {
     }
   });
 
+  it('does not create session-scoped team mode state on shutdown when only root team mode state exists', async () => {
+    const wd = await mkdtemp(join(tmpdir(), 'omx-team-shutdown-root-mode-only-'));
+    const previousCwd = process.cwd();
+    const teamName = 'team-shutdown-root-only';
+    const sessionId = 'sess-team-shutdown-root-only';
+
+    try {
+      process.chdir(wd);
+      const stateDir = join(wd, '.omx', 'state');
+      const scopedStatePath = join(stateDir, 'sessions', sessionId, 'team-state.json');
+      await mkdir(stateDir, { recursive: true });
+      await writeFile(
+        join(stateDir, 'session.json'),
+        JSON.stringify({ session_id: sessionId }),
+      );
+      await writeFile(
+        join(stateDir, 'team-state.json'),
+        JSON.stringify({
+          active: true,
+          mode: 'team',
+          current_phase: 'team-exec',
+          team_name: teamName,
+        }, null, 2),
+      );
+      await initTeamState(
+        teamName,
+        'shutdown should not create scoped team mode state from a root-only mode state',
+        'executor',
+        1,
+        wd,
+      );
+
+      await teamCommand(['shutdown', teamName, '--force']);
+
+      assert.equal(existsSync(scopedStatePath), false);
+      const rootState = JSON.parse(
+        await readFile(join(stateDir, 'team-state.json'), 'utf-8'),
+      ) as Record<string, unknown>;
+      assert.equal(rootState.active, false);
+      assert.equal(rootState.current_phase, 'cancelled');
+      assert.equal(rootState.team_name, teamName);
+    } finally {
+      process.chdir(previousCwd);
+      await rm(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('does not create session-scoped team mode state on shutdown when a stale session.json remains', async () => {
+    const wd = await mkdtemp(join(tmpdir(), 'omx-team-shutdown-stale-session-json-'));
+    const previousCwd = process.cwd();
+    const teamName = 'team-shutdown-stale-session';
+    const staleSessionId = 'sess-team-shutdown-stale';
+
+    try {
+      process.chdir(wd);
+      const stateDir = join(wd, '.omx', 'state');
+      const staleSessionDir = join(stateDir, 'sessions', staleSessionId);
+      const scopedStatePath = join(staleSessionDir, 'team-state.json');
+      await mkdir(staleSessionDir, { recursive: true });
+      await writeFile(
+        join(stateDir, 'session.json'),
+        JSON.stringify({ session_id: staleSessionId }),
+      );
+      await writeFile(
+        join(staleSessionDir, 'hud-state.json'),
+        JSON.stringify({ turn_count: 12 }, null, 2),
+      );
+      await writeFile(
+        join(stateDir, 'team-state.json'),
+        JSON.stringify({
+          active: true,
+          mode: 'team',
+          current_phase: 'team-exec',
+          team_name: teamName,
+        }, null, 2),
+      );
+      await initTeamState(
+        teamName,
+        'shutdown should ignore stale session.json when only root team mode state exists',
+        'executor',
+        1,
+        wd,
+      );
+
+      await teamCommand(['shutdown', teamName, '--force']);
+
+      assert.equal(existsSync(scopedStatePath), false);
+      const rootState = JSON.parse(
+        await readFile(join(stateDir, 'team-state.json'), 'utf-8'),
+      ) as Record<string, unknown>;
+      assert.equal(rootState.active, false);
+      assert.equal(rootState.current_phase, 'cancelled');
+      assert.equal(rootState.team_name, teamName);
+    } finally {
+      process.chdir(previousCwd);
+      await rm(wd, { recursive: true, force: true });
+    }
+  });
+
   it('parses --confirm-issues from shutdown args', () => {
     const teamArgs = ['shutdown', 'my-team', '--confirm-issues'];
     const confirmIssues = teamArgs.includes('--confirm-issues');

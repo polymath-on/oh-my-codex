@@ -1,6 +1,7 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { updateModeState, startMode, readModeState, readModeStateForSession } from '../modes/base.js';
+import { updateModeState, startMode, readModeState } from '../modes/base.js';
+import { getStatePath, validateSessionId } from '../mcp/state-paths.js';
 import { monitorTeam, resumeTeam, shutdownTeam, startTeam, type TeamRuntime, type TeamSnapshot } from '../team/runtime.js';
 import { DEFAULT_MAX_WORKERS } from '../team/state.js';
 import { sanitizeTeamName } from '../team/tmux-session.js';
@@ -46,6 +47,23 @@ interface TeamFollowupContext {
   explicitWorkerCount: boolean;
   agentType?: string;
   explicitAgentType?: boolean;
+}
+
+function persistExactTeamModeState(
+  cwd: string,
+  updates: Record<string, unknown>,
+  sessionId?: string,
+): boolean {
+  const statePath = getStatePath('team', cwd, sessionId);
+  if (!existsSync(statePath)) return false;
+
+  try {
+    const current = JSON.parse(readFileSync(statePath, 'utf-8')) as Record<string, unknown>;
+    writeFileSync(statePath, JSON.stringify({ ...current, ...updates }, null, 2));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function readPersistedTeamFollowupState(cwd: string): {
@@ -1247,12 +1265,40 @@ async function persistTeamShutdownModeState(
   if (existsSync(sessionStatePath)) {
     try {
       const parsed = JSON.parse(readFileSync(sessionStatePath, 'utf-8')) as { session_id?: unknown };
-      if (typeof parsed.session_id === 'string' && parsed.session_id.trim()) {
-        scopedSessionId = parsed.session_id.trim();
-      }
+      scopedSessionId = validateSessionId(parsed.session_id);
     } catch {
       // Best-effort shutdown state sync only.
     }
+  }
+
+  const shutdownState: Record<string, unknown> = {
+    active: false,
+    current_phase: 'cancelled',
+    completed_at: new Date().toISOString(),
+    team_name: teamName,
+    ...(configSnapshot
+      ? {
+        task_description: configSnapshot.task,
+        agent_count: configSnapshot.workerCount,
+        agent_types: configSnapshot.agentType,
+      }
+      : {}),
+  };
+
+  const rootStatePath = getStatePath('team', cwd);
+  const hasRootState = existsSync(rootStatePath);
+  const hasScopedState = scopedSessionId
+    ? existsSync(getStatePath('team', cwd, scopedSessionId))
+    : false;
+
+  if (hasRootState || hasScopedState) {
+    if (hasRootState) {
+      persistExactTeamModeState(cwd, shutdownState);
+    }
+    if (scopedSessionId && hasScopedState) {
+      persistExactTeamModeState(cwd, shutdownState, scopedSessionId);
+    }
+    return;
   }
 
   const existing = await readModeState('team', cwd);
@@ -1271,38 +1317,7 @@ async function persistTeamShutdownModeState(
     }
   }
 
-  await updateModeState('team', {
-    active: false,
-    current_phase: 'cancelled',
-    completed_at: new Date().toISOString(),
-    team_name: teamName,
-    ...(configSnapshot
-      ? {
-        task_description: configSnapshot.task,
-        agent_count: configSnapshot.workerCount,
-        agent_types: configSnapshot.agentType,
-      }
-      : {}),
-  }, cwd);
-
-  if (scopedSessionId) {
-    const scopedState = await readModeStateForSession('team', scopedSessionId, cwd);
-    if (scopedState) {
-      await updateModeState('team', {
-        active: false,
-        current_phase: 'cancelled',
-        completed_at: new Date().toISOString(),
-        team_name: teamName,
-        ...(configSnapshot
-          ? {
-            task_description: configSnapshot.task,
-            agent_count: configSnapshot.workerCount,
-            agent_types: configSnapshot.agentType,
-          }
-          : {}),
-      }, cwd, scopedSessionId);
-    }
-  }
+  await updateModeState('team', shutdownState, cwd);
 }
 
 
