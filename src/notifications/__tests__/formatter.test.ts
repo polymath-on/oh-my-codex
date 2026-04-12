@@ -297,6 +297,18 @@ describe('parseTmuxTail', () => {
     assert.ok(!result.includes('ctrl+o'));
   });
 
+  it('parseTmuxTail preserves operator-visible lines until idle dedupe decides whether to resend them', () => {
+    const raw = [
+      'risk summary',
+      '{"severity":"error","message":"old metadata"}',
+      'resolved setup failure',
+      'Fresh actionable failure',
+    ].join('\n');
+    const result = formatSessionIdle({ ...basePayload, tmuxTail: raw });
+    assert.ok(result.includes('Fresh actionable failure'));
+    assert.ok(result.includes('risk summary'));
+  });
+
   it('buildTmuxTailBlock omits block when all lines filtered', () => {
     const raw = '● spinner only\n⎿ more spinner';
     const result = formatSessionIdle({ ...basePayload, tmuxTail: raw });

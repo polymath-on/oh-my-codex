@@ -14,6 +14,8 @@ import {
   recordIdleNotificationSent,
   shouldSendSessionIdleHookEvent,
   recordSessionIdleHookEventSent,
+  shouldIncludeSessionIdleTmuxTail,
+  recordSessionIdleTmuxTailSent,
 } from '../idle-cooldown.js';
 
 function makeTmpStateDir(): string {
@@ -236,5 +238,51 @@ describe('session-idle hook event dedupe', () => {
       shouldSendSessionIdleHookEvent(stateDir, sessionId, '{"phase":"idle","summary":"Waiting on user input"}'),
       true,
     );
+  });
+});
+
+describe('session-idle tmux tail dedupe', () => {
+  let stateDir: string;
+
+  beforeEach(() => {
+    stateDir = makeTmpStateDir();
+  });
+
+  afterEach(() => {
+    rmSync(stateDir, { recursive: true, force: true });
+  });
+
+  it('suppresses unchanged parsed tmux tails for repeated idle notifications', () => {
+    const sessionId = 'test-session-idle-tmux-tail';
+    const fingerprint = 'Waiting on review';
+
+    recordSessionIdleTmuxTailSent(stateDir, sessionId, fingerprint);
+
+    assert.equal(shouldIncludeSessionIdleTmuxTail(stateDir, sessionId, fingerprint), false);
+  });
+
+  it('allows newly changed tmux tails to be included immediately', () => {
+    const sessionId = 'test-session-idle-tmux-tail-change';
+    recordSessionIdleTmuxTailSent(stateDir, sessionId, 'Waiting on review');
+
+    assert.equal(shouldIncludeSessionIdleTmuxTail(stateDir, sessionId, 'Fresh setup error'), true);
+  });
+
+  it('treats empty tmux tails as nothing to resend', () => {
+    const sessionId = 'test-session-idle-tmux-tail-empty';
+
+    assert.equal(shouldIncludeSessionIdleTmuxTail(stateDir, sessionId, ''), false);
+  });
+
+  it('keeps lifecycle fingerprint and tmux-tail fingerprint independently', () => {
+    const sessionId = 'test-session-idle-tmux-tail-independent';
+    recordIdleNotificationSent(stateDir, sessionId, '{"phase":"idle","summary":"Waiting on review"}');
+    recordSessionIdleTmuxTailSent(stateDir, sessionId, 'Waiting on review');
+
+    assert.equal(
+      shouldSendIdleNotification(stateDir, sessionId, '{"phase":"idle","summary":"Waiting on user input"}'),
+      true,
+    );
+    assert.equal(shouldIncludeSessionIdleTmuxTail(stateDir, sessionId, 'Waiting on review'), false);
   });
 });

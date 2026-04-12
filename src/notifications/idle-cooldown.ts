@@ -25,6 +25,7 @@ const SESSION_IDLE_HOOK_STATE_FILE = 'session-idle-hook-state.json';
 interface IdleNotificationState {
   lastSentAt?: string;
   fingerprint?: string;
+  tmuxTailFingerprint?: string;
 }
 
 /**
@@ -98,21 +99,22 @@ function readIdleNotificationState(cooldownPath: string): IdleNotificationState 
     return {
       lastSentAt: typeof data?.lastSentAt === 'string' ? data.lastSentAt : undefined,
       fingerprint: normalizeIdleFingerprint(typeof data?.fingerprint === 'string' ? data.fingerprint : ''),
+      tmuxTailFingerprint: normalizeIdleFingerprint(typeof data?.tmuxTailFingerprint === 'string' ? data.tmuxTailFingerprint : ''),
     };
   } catch {
     return null;
   }
 }
 
-function writeIdleNotificationState(cooldownPath: string, fingerprint?: string): void {
+function writeIdleNotificationState(cooldownPath: string, patch: IdleNotificationState): void {
   try {
     const dir = dirname(cooldownPath);
     mkdirSync(dir, { recursive: true });
-    const normalizedFingerprint = normalizeIdleFingerprint(fingerprint);
-    const state: IdleNotificationState = { lastSentAt: new Date().toISOString() };
-    if (normalizedFingerprint) {
-      state.fingerprint = normalizedFingerprint;
-    }
+    const previous = readIdleNotificationState(cooldownPath) ?? {};
+    const state: IdleNotificationState = {
+      ...previous,
+      ...patch,
+    };
     writeFileSync(cooldownPath, JSON.stringify(state, null, 2));
   } catch {
     // ignore write errors — best effort
@@ -159,7 +161,11 @@ export function shouldSendIdleNotification(stateDir: string, sessionId?: string,
  */
 export function recordIdleNotificationSent(stateDir: string, sessionId?: string, fingerprint?: string): void {
   const cooldownPath = getCooldownStatePath(stateDir, sessionId);
-  writeIdleNotificationState(cooldownPath, fingerprint);
+  const normalizedFingerprint = normalizeIdleFingerprint(fingerprint);
+  writeIdleNotificationState(cooldownPath, {
+    lastSentAt: new Date().toISOString(),
+    fingerprint: normalizedFingerprint || undefined,
+  });
 }
 
 /**
@@ -184,5 +190,44 @@ export function shouldSendSessionIdleHookEvent(stateDir: string, sessionId?: str
  * Record that the coarse session-idle hook event was dispatched.
  */
 export function recordSessionIdleHookEventSent(stateDir: string, sessionId?: string, fingerprint?: string): void {
-  writeIdleNotificationState(getSessionIdleHookStatePath(stateDir, sessionId), fingerprint);
+  const normalizedFingerprint = normalizeIdleFingerprint(fingerprint);
+  writeIdleNotificationState(getSessionIdleHookStatePath(stateDir, sessionId), {
+    lastSentAt: new Date().toISOString(),
+    fingerprint: normalizedFingerprint || undefined,
+  });
+}
+
+/**
+ * Check whether a session-idle notification should include the captured tmux tail.
+ *
+ * Repeated idle notifications often reuse the same pane history. When the parsed
+ * tail text is unchanged, downstream keyword scanners should not see it again.
+ */
+export function shouldIncludeSessionIdleTmuxTail(
+  stateDir: string,
+  sessionId?: string,
+  tmuxTailFingerprint?: string,
+): boolean {
+  const normalizedFingerprint = normalizeIdleFingerprint(tmuxTailFingerprint);
+  if (!normalizedFingerprint) return false;
+
+  const state = readIdleNotificationState(getCooldownStatePath(stateDir, sessionId));
+  if (!state) return true;
+
+  return state.tmuxTailFingerprint !== normalizedFingerprint;
+}
+
+/**
+ * Record the parsed tmux-tail fingerprint last included in a session-idle notification.
+ */
+export function recordSessionIdleTmuxTailSent(
+  stateDir: string,
+  sessionId?: string,
+  tmuxTailFingerprint?: string,
+): void {
+  const normalizedFingerprint = normalizeIdleFingerprint(tmuxTailFingerprint);
+  const cooldownPath = getCooldownStatePath(stateDir, sessionId);
+  writeIdleNotificationState(cooldownPath, {
+    tmuxTailFingerprint: normalizedFingerprint || undefined,
+  });
 }

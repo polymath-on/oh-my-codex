@@ -144,6 +144,11 @@ import {
   recordLifecycleNotificationSent,
 } from "./lifecycle-dedupe.js";
 import type { OpenClawHookEvent } from "../openclaw/types.js";
+import { parseTmuxTail } from "./formatter.js";
+import {
+  shouldIncludeSessionIdleTmuxTail,
+  recordSessionIdleTmuxTailSent,
+} from "./idle-cooldown.js";
 
 // Suppress unused import — used by callers via re-export
 void getActiveProfileName;
@@ -232,11 +237,12 @@ export async function notifyLifecycle(
 
     // Capture tmux tail for session+ verbosity on idle/stop/end events
     const verbosity = getVerbosity(config);
-    if (
-      shouldIncludeTmuxTail(verbosity) &&
-      !data.tmuxTail &&
-      (event === "session-idle" || event === "session-stop" || event === "session-end")
-    ) {
+    const shouldAttemptTmuxTail =
+      shouldIncludeTmuxTail(verbosity)
+      && !data.tmuxTail
+      && (event === "session-idle" || event === "session-stop" || event === "session-end");
+
+    if (shouldAttemptTmuxTail) {
       const { captureTmuxPaneWithLiveness } = await import("./tmux.js");
       const tmuxCapture = captureTmuxPaneWithLiveness(payload.tmuxPaneId);
       payload.tmuxTail = tmuxCapture.content ?? undefined;
@@ -246,9 +252,21 @@ export async function notifyLifecycle(
       payload.tmuxTailLive = data.tmuxTailLive;
     }
 
+    const lifecycleStateDir = payload.projectPath ? omxStateDir(payload.projectPath) : "";
+    const normalizedIdleTmuxTail = event === "session-idle" ? parseTmuxTail(payload.tmuxTail || "") : "";
+    const sessionIdleTmuxTailAllowed = event !== "session-idle"
+      || shouldIncludeSessionIdleTmuxTail(lifecycleStateDir, payload.sessionId, normalizedIdleTmuxTail);
+
+    if (
+      event === "session-idle"
+      && !sessionIdleTmuxTailAllowed
+    ) {
+      payload.tmuxTail = undefined;
+      payload.tmuxTailLive = undefined;
+    }
+
     payload.message = data.message || formatNotification(payload);
 
-    const lifecycleStateDir = payload.projectPath ? omxStateDir(payload.projectPath) : "";
     if (!shouldSendLifecycleNotification(lifecycleStateDir, payload)) {
       return {
         event,
@@ -260,6 +278,9 @@ export async function notifyLifecycle(
     const result = await dispatchNotifications(config, event, payload);
     if (result.anySuccess) {
       recordLifecycleNotificationSent(lifecycleStateDir, payload);
+      if (event === "session-idle" && sessionIdleTmuxTailAllowed) {
+        recordSessionIdleTmuxTailSent(lifecycleStateDir, payload.sessionId, normalizedIdleTmuxTail);
+      }
     }
 
     // Fire-and-forget OpenClaw gateway call
