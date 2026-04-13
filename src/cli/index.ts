@@ -927,7 +927,7 @@ export async function launchWithHud(args: string[]): Promise<void> {
       scope: "launch",
       mode: parsedWorktree.mode,
     });
-    const ensured = ensureWorktree(planned);
+    const ensured = ensureWorktree(planned, { allowDirtyReuse: true });
     if (ensured.enabled) {
       cwd = ensured.worktreePath;
       if (ensured.dirty) {
@@ -1027,7 +1027,7 @@ export async function execWithOverlay(args: string[]): Promise<void> {
       scope: "launch",
       mode: parsedWorktree.mode,
     });
-    const ensured = ensureWorktree(planned);
+    const ensured = ensureWorktree(planned, { allowDirtyReuse: true });
     if (ensured.enabled) {
       cwd = ensured.worktreePath;
       if (ensured.dirty) {
