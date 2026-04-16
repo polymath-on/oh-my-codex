@@ -3051,15 +3051,69 @@ function parseWatcherPidFile(content: string): number | null {
   const trimmed = content.trim();
   if (!trimmed) return null;
   try {
-    const parsed = JSON.parse(trimmed) as { pid?: unknown };
-    return typeof parsed.pid === "number" &&
-      Number.isFinite(parsed.pid) &&
-      parsed.pid > 0
-      ? parsed.pid
-      : null;
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (typeof parsed === "number") {
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    }
+    const pid =
+      typeof parsed === "object" && parsed !== null
+        ? (parsed as { pid?: unknown }).pid
+        : undefined;
+    return typeof pid === "number" && Number.isFinite(pid) && pid > 0 ? pid : null;
   } catch {
     const pid = Number.parseInt(trimmed, 10);
     return Number.isFinite(pid) && pid > 0 ? pid : null;
+  }
+}
+
+interface WatcherPidRecord {
+  pid: number;
+  startedAt: string | null;
+}
+
+function parseWatcherPidRecord(content: string): WatcherPidRecord | null {
+  const trimmed = content.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (typeof parsed === "object" && parsed !== null) {
+      const { pid, started_at: startedAtRaw } = parsed as {
+        pid?: unknown;
+        started_at?: unknown;
+      };
+      if (typeof pid === "number" && Number.isFinite(pid) && pid > 0) {
+        return {
+          pid,
+          startedAt: typeof startedAtRaw === "string" ? startedAtRaw : null,
+        };
+      }
+    }
+  } catch {
+  }
+
+  const pid = parseWatcherPidFile(trimmed);
+  return pid ? { pid, startedAt: null } : null;
+}
+
+function isLikelyOmxWatcherProcess(
+  pid: number,
+  execFileSyncFn: typeof execFileSync = execFileSync,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  if (platform === "win32") {
+    // ps is unavailable on native Windows; fall back to unconditional reap
+    // to preserve the pre-identity-check behavior on opted-in Windows hosts.
+    return true;
+  }
+  try {
+    const cmd = execFileSyncFn("ps", ["-p", String(pid), "-o", "command="], {
+      encoding: "utf-8",
+      timeout: 2000,
+      windowsHide: true,
+    }) as string;
+    return cmd.includes("notify-fallback-watcher") || cmd.includes("hook-derived-watcher");
+  } catch {
+    return false;
   }
 }
 
@@ -3071,6 +3125,7 @@ export async function reapStaleNotifyFallbackWatcher(
     tryKillPid?: (pid: number, signal?: NodeJS.Signals) => boolean;
     hasErrnoCode?: (error: unknown, code: string) => boolean;
     warn?: (message?: unknown, ...optionalParams: unknown[]) => void;
+    isWatcherProcess?: (pid: number) => boolean;
   } = {},
 ): Promise<void> {
   const exists = deps.exists ?? existsSync;
@@ -3081,11 +3136,12 @@ export async function reapStaleNotifyFallbackWatcher(
   const tryKillPidImpl = deps.tryKillPid ?? tryKillPid;
   const hasErrnoCodeImpl = deps.hasErrnoCode ?? hasErrnoCode;
   const warn = deps.warn ?? console.warn;
+  const isWatcherProcessImpl = deps.isWatcherProcess ?? isLikelyOmxWatcherProcess;
 
   try {
-    const prevPid = parseWatcherPidFile(await readFileImpl(pidPath, "utf-8"));
-    if (prevPid) {
-      tryKillPidImpl(prevPid, "SIGTERM");
+    const record = parseWatcherPidRecord(await readFileImpl(pidPath, "utf-8"));
+    if (record && isWatcherProcessImpl(record.pid)) {
+      tryKillPidImpl(record.pid, "SIGTERM");
     }
   } catch (error: unknown) {
     if (!hasErrnoCodeImpl(error, "ESRCH")) {
