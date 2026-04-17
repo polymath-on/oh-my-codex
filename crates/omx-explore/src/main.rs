@@ -13,6 +13,7 @@ const HARNESS_ROOT_ENV: &str = "OMX_EXPLORE_ROOT";
 const INTERNAL_DIRECT_WRAPPER_FLAG: &str = "--internal-allowlist-direct";
 const INTERNAL_SHELL_WRAPPER_FLAG: &str = "--internal-allowlist-shell";
 const TEMP_ALLOWLIST_DIR_PREFIX: &str = "omx-explore-allowlist-";
+const SHELL_STARTUP_ENV_VARS: &[&str] = &["BASH_ENV", "ENV", "PROMPT_COMMAND"];
 const WINDOWS_UNSUPPORTED_ALLOWLIST_MESSAGE: &str =
     "omx explore built-in harness is not ready on Windows because its allowlist runtime relies on POSIX sh/bash wrappers. Set OMX_EXPLORE_BIN to a compatible custom harness, prefer `omx sparkshell` for shell-native read-only lookups, or run `omx doctor` for readiness details.";
 
@@ -227,6 +228,7 @@ fn invoke_codex(args: &Args, model: &str, prompt_contract: &str) -> io::Result<A
         .env(HARNESS_ROOT_ENV, &args.cwd)
         .env("PATH", &allowlist.bin_dir)
         .env("SHELL", &allowlist.shell_path);
+    sanitize_explore_subprocess_env(&mut command);
     let output = command.output()?;
 
     let markdown = read_to_string(&output_path).ok();
@@ -644,6 +646,12 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
+fn sanitize_explore_subprocess_env(command: &mut Command) {
+    for key in SHELL_STARTUP_ENV_VARS {
+        command.env_remove(key);
+    }
+}
+
 fn run_internal_direct_wrapper<I>(mut args: I) -> Result<(), String>
 where
     I: Iterator<Item = OsString>,
@@ -680,6 +688,7 @@ where
     if real_shell.ends_with("bash") {
         child.arg("--noprofile").arg("--norc");
     }
+    sanitize_explore_subprocess_env(&mut child);
     let status = child
         .arg("-lc")
         .arg(&command)
@@ -1622,6 +1631,100 @@ exit 17
         }
 
         let _error = result.expect_err("both attempts should fail");
+    }
+
+    #[test]
+    fn invoke_codex_clears_shell_startup_env_before_launching_codex() {
+        let _guard = env_lock();
+        let root = temp_allowlist_dir().expect("temp root");
+        let repo = root.path.join("repo");
+        create_dir_all(&repo).expect("create repo");
+        let prompt_file = root.path.join("prompt.md");
+        write(&prompt_file, "contract").expect("write prompt");
+        let capture_path = root.path.join("capture.txt");
+        let fake_codex = root.path.join("codex-stub");
+        write_executable(
+            &fake_codex,
+            &format!(
+                r#"#!/bin/sh
+set -eu
+output_path=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-o" ]; then
+    shift
+    output_path="$1"
+  fi
+  shift
+done
+printf 'BASH_ENV=%s\nENV=%s\nPROMPT_COMMAND=%s\n' "${{BASH_ENV:-}}" "${{ENV:-}}" "${{PROMPT_COMMAND:-}}" > {}
+printf '# Answer\nok\n' > "$output_path"
+"#,
+                shell_quote(&capture_path.display().to_string())
+            ),
+        )
+        .expect("write fake codex");
+
+        unsafe {
+            env::set_var(CODEX_BIN_ENV, &fake_codex);
+            env::set_var("BASH_ENV", "/tmp/bash-env-should-not-leak");
+            env::set_var("ENV", "/tmp/env-should-not-leak");
+            env::set_var("PROMPT_COMMAND", "printf should-not-run");
+        }
+        let attempt = invoke_codex(
+            &Args {
+                cwd: repo.clone(),
+                prompt: "find tests".to_string(),
+                prompt_file,
+                spark_model: "spark-model".to_string(),
+                fallback_model: "fallback-model".to_string(),
+            },
+            "spark-model",
+            "contract",
+        )
+        .expect("invoke codex");
+        unsafe {
+            env::remove_var(CODEX_BIN_ENV);
+            env::remove_var("BASH_ENV");
+            env::remove_var("ENV");
+            env::remove_var("PROMPT_COMMAND");
+        }
+
+        assert_eq!(attempt.status_code, 0);
+        assert_eq!(
+            read_to_string(&capture_path).expect("read capture"),
+            "BASH_ENV=\nENV=\nPROMPT_COMMAND=\n"
+        );
+    }
+
+    #[test]
+    fn sanitize_explore_subprocess_env_blocks_bash_env_startup_hooks() {
+        let _guard = env_lock();
+        let root = temp_allowlist_dir().expect("temp root");
+        let bash_env_log = root.path.join("bash-env.log");
+        let bash_env = root.path.join("bash-env.sh");
+        write(
+            &bash_env,
+            format!(
+                "printf 'startup:%s\\n' \"$BASH_ENV\" >> {}\n",
+                shell_quote(&bash_env_log.display().to_string())
+            ),
+        )
+        .expect("write bash env");
+        let bash_path = resolve_host_command("bash").expect("host bash path");
+
+        unsafe {
+            env::set_var("BASH_ENV", &bash_env);
+        }
+        let mut child = Command::new(&bash_path);
+        child.arg("--noprofile").arg("--norc").arg("-lc").arg("true");
+        sanitize_explore_subprocess_env(&mut child);
+        let status = child.status().expect("run bash");
+        unsafe {
+            env::remove_var("BASH_ENV");
+        }
+
+        assert!(status.success());
+        assert_eq!(read_to_string(&bash_env_log).unwrap_or_default(), "");
     }
 
     #[test]
