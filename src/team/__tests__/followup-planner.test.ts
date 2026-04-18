@@ -78,6 +78,30 @@ describe('followup-planner', () => {
     assert.equal(plan.verificationPlan.checkpoints.length, 3);
   });
 
+  it('allocates explore plus researcher lanes for mixed local+official-doc follow-up', () => {
+    const plan = buildFollowupStaffingPlan(
+      'team',
+      'Find which files implement session refresh in the repo, then research the official docs and version compatibility notes for the auth SDK',
+      ['executor', 'explore', 'researcher', 'verifier'],
+      { workerCount: 3, fallbackRole: 'executor' },
+    );
+
+    assert.ok(plan.allocations.some((allocation) => allocation.role === 'explore' && allocation.reason.includes('primary')));
+    assert.ok(plan.allocations.some((allocation) => allocation.role === 'researcher' && allocation.reason.includes('specialist')));
+  });
+
+  it('allocates explore plus dependency-expert lanes for mixed local+dependency evaluation follow-up', () => {
+    const plan = buildFollowupStaffingPlan(
+      'team',
+      'Map which local packages currently handle logging, then compare replacement npm packages for license risk, maintenance, and migration path',
+      ['dependency-expert', 'executor', 'explore', 'verifier'],
+      { workerCount: 3, fallbackRole: 'executor' },
+    );
+
+    assert.ok(plan.allocations.some((allocation) => allocation.role === 'explore' && allocation.reason.includes('primary')));
+    assert.ok(plan.allocations.some((allocation) => allocation.role === 'dependency-expert' && allocation.reason.includes('specialist')));
+  });
+
   it('recognizes short approved team follow-up shortcuts in English and Korean', () => {
     assert.equal(
       isApprovedExecutionFollowupShortcut('team', 'team', { planningComplete: true }),
