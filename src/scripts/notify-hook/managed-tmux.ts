@@ -268,6 +268,44 @@ function paneLooksLikeManagedAgent({ currentCommand, startCommand }: { currentCo
   if (startCommand.includes('codex')) return true;
   return currentCommand === 'codex' || currentCommand === 'node' || currentCommand === 'npx';
 }
+
+function paneLooksLikeRetainableManagedAnchor({ currentCommand, startCommand }: { currentCommand: string; startCommand: string }): boolean {
+  if (/\bomx\b.*\bhud\b.*--watch/i.test(startCommand)) return false;
+  if (startCommand.includes('codex')) return true;
+  return currentCommand === 'codex';
+}
+
+interface ManagedSessionPaneRow {
+  paneId: string;
+  active: boolean;
+  currentCommand: string;
+  startCommand: string;
+}
+
+function parseManagedSessionPaneRows(stdout: string): ManagedSessionPaneRow[] {
+  return safeString(stdout)
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      const [paneId = '', activeRaw = '0', rawCurrentCommand = '', rawStartCommand = ''] = line.split('\t');
+      return {
+        paneId: safeString(paneId).trim(),
+        active: safeString(activeRaw).trim() === '1',
+        currentCommand: safeString(rawCurrentCommand).trim().toLowerCase(),
+        startCommand: safeString(rawStartCommand).trim().toLowerCase(),
+      };
+    })
+    .filter((row) => row.paneId !== '');
+}
+
+function selectManagedSessionPane(rows: ManagedSessionPaneRow[]): string {
+  const nonHudRows = rows.filter((row) => !/\bomx\b.*\bhud\b.*--watch/i.test(row.startCommand));
+  const canonicalRows = nonHudRows.filter((row) => row.startCommand.includes('codex') || row.currentCommand === 'codex');
+  const activeCanonical = canonicalRows.find((row) => row.active);
+  if (activeCanonical) return activeCanonical.paneId;
+  return canonicalRows[0]?.paneId || '';
+}
 export async function resolveManagedCurrentPane(cwd: string, payload: any, { allowTeamWorker = false } = {}): Promise<string> {
   const paneTarget = safeString(process.env.TMUX_PANE || '').trim();
   if (!paneTarget) return '';
@@ -286,22 +324,10 @@ export async function resolveManagedSessionPane(cwd: string, payload: any): Prom
   try {
     const panesResult = await runProcess(
       'tmux',
-      ['list-panes', '-s', '-t', expectedSession, '-F', '#{pane_id}\t#{pane_current_command}\t#{pane_start_command}'],
+      ['list-panes', '-s', '-t', expectedSession, '-F', '#{pane_id}\t#{pane_active}\t#{pane_current_command}\t#{pane_start_command}'],
       2000,
     );
-    const panes = safeString(panesResult.stdout)
-      .trim()
-      .split('\n')
-      .filter(Boolean);
-    for (const line of panes) {
-      const [candidatePaneId, rawCurrentCommand = '', rawStartCommand = ''] = line.split('\t');
-      const startCommand = safeString(rawStartCommand).toLowerCase();
-      const currentCommand = safeString(rawCurrentCommand).trim().toLowerCase();
-      if (!candidatePaneId) continue;
-      if (/\bomx\b.*\bhud\b.*--watch/i.test(startCommand)) continue;
-      if (startCommand.includes('codex')) return candidatePaneId;
-      if (currentCommand === 'codex') return candidatePaneId;
-    }
+    return selectManagedSessionPane(parseManagedSessionPaneRows(panesResult.stdout));
   } catch {
     // best effort only
   }
@@ -315,6 +341,9 @@ export async function resolveManagedPaneFromAnchor(anchorPane: string, cwd: stri
   const verdict = await verifyManagedPaneTarget(paneTarget, cwd, payload, { allowTeamWorker });
   if (!verdict.ok) return '';
 
+  const commandState = await readManagedPaneCommandState(paneTarget);
+  if (paneLooksLikeRetainableManagedAnchor(commandState)) return paneTarget;
+
   try {
     const sessionResult = await runProcess('tmux', ['display-message', '-p', '-t', paneTarget, '#S'], 2000);
     const sessionName = safeString(sessionResult.stdout).trim();
@@ -322,19 +351,11 @@ export async function resolveManagedPaneFromAnchor(anchorPane: string, cwd: stri
 
     const panesResult = await runProcess(
       'tmux',
-      ['list-panes', '-s', '-t', sessionName, '-F', '#{pane_id}\t#{pane_current_command}\t#{pane_start_command}'],
+      ['list-panes', '-s', '-t', sessionName, '-F', '#{pane_id}\t#{pane_active}\t#{pane_current_command}\t#{pane_start_command}'],
       2000,
     );
-    const panes = safeString(panesResult.stdout).trim().split('\n').filter(Boolean);
-    for (const line of panes) {
-      const [candidatePaneId, rawCurrentCommand = '', rawStartCommand = ''] = line.split('\t');
-      const startCommand = safeString(rawStartCommand).toLowerCase();
-      const currentCommand = safeString(rawCurrentCommand).trim().toLowerCase();
-      if (!candidatePaneId) continue;
-      if (/\bomx\b.*\bhud\b.*--watch/i.test(startCommand)) continue;
-      if (startCommand.includes('codex')) return candidatePaneId;
-      if (currentCommand === 'codex') return candidatePaneId;
-    }
+    const selectedPane = selectManagedSessionPane(parseManagedSessionPaneRows(panesResult.stdout));
+    if (selectedPane) return selectedPane;
   } catch {
     // best effort only
   }

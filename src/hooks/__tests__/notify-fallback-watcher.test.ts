@@ -271,6 +271,111 @@ exit 0
 `;
 }
 
+function buildManagedRalphTmux(
+  tmuxLogPath: string,
+  options: {
+    cwd: string;
+    managedSessionName: string;
+    anchorPane: string;
+    livePane: string;
+    codexPanes?: Array<{ paneId: string; active?: boolean; currentCommand?: string; startCommand?: string }>;
+    missingAnchor?: boolean;
+  },
+): string {
+  const { cwd, managedSessionName, anchorPane, livePane, codexPanes, missingAnchor = false } = options;
+  const panes = (codexPanes && codexPanes.length > 0)
+    ? codexPanes
+    : [{ paneId: livePane, active: true, currentCommand: 'codex', startCommand: 'codex' }];
+  const listPaneOutput = panes
+    .map((pane) => {
+      const paneId = pane.paneId;
+      const active = pane.active ? '1' : '0';
+      const currentCommand = pane.currentCommand || 'codex';
+      const startCommand = pane.startCommand || 'codex';
+      return `${paneId}\t${active}\t${currentCommand}\t${startCommand}`;
+    })
+    .join('\n');
+  const paneCommandBranches = panes
+    .map((pane) => {
+      const currentCommand = (pane.currentCommand || 'codex').replace(/"/g, '\\"');
+      const startCommand = (pane.startCommand || 'codex').replace(/"/g, '\\"');
+      return `  if [[ "$format" == "#{pane_current_command}" && "$target" == "${pane.paneId}" ]]; then
+    echo "${currentCommand}"
+    exit 0
+  fi
+  if [[ "$format" == "#{pane_start_command}" && "$target" == "${pane.paneId}" ]]; then
+    echo "${startCommand}"
+    exit 0
+  fi`;
+    })
+    .join('\n');
+  return `#!/usr/bin/env bash
+set -eu
+echo "$@" >> "${tmuxLogPath}"
+cmd="$1"
+shift || true
+if [[ "$cmd" == "display-message" ]]; then
+  target=""
+  format=""
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      -p) shift ;;
+      -t) target="$2"; shift 2 ;;
+      *) format="$1"; shift ;;
+    esac
+  done
+  if [[ "$target" == "${anchorPane}" && "${missingAnchor ? '1' : '0'}" == "1" ]]; then
+    echo "pane missing" >&2
+    exit 1
+  fi
+  if [[ "$format" == "#{pane_in_mode}" ]]; then
+    echo "0"
+    exit 0
+  fi
+  if [[ "$format" == "#{pane_id}" ]]; then
+    echo "$target"
+    exit 0
+  fi
+  if [[ "$format" == "#{pane_current_path}" ]]; then
+    echo "${cwd}"
+    exit 0
+  fi
+${paneCommandBranches}
+  if [[ "$format" == "#S" ]]; then
+    if [[ "$target" == "${anchorPane}" || "$target" == "${livePane}" ]]; then
+      echo "${managedSessionName}"
+      exit 0
+    fi
+    echo "unknown target" >&2
+    exit 1
+  fi
+  exit 0
+fi
+if [[ "$cmd" == "list-panes" ]]; then
+  target=""
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      -F) shift 2 ;;
+      -t) shift; target="$1" ;;
+    esac
+    shift || true
+  done
+  if [[ "$target" == "${managedSessionName}" ]]; then
+    printf '%s\n' "${listPaneOutput}"
+    exit 0
+  fi
+  echo "can't find session" >&2
+  exit 1
+fi
+if [[ "$cmd" == "capture-pane" ]]; then
+  exit 0
+fi
+if [[ "$cmd" == "send-keys" ]]; then
+  exit 0
+fi
+exit 0
+`;
+}
 function buildCleanNotifyEnv(
   overrides: Record<string, string> = {},
 ): NodeJS.ProcessEnv {
@@ -2265,8 +2370,225 @@ exit 0
     }
   });
 
-  it('sends the first Ralph continue steer immediately when persisted steer state is empty', async () => {
-    const wd = await mkdtemp(join(tmpdir(), 'omx-fallback-ralph-first-steer-'));
+  it('rebinds a stale-but-present session-scoped Ralph shell pane to the live pane before continue steer', async () => {
+    const wd = await mkdtemp(join(tmpdir(), 'omx-fallback-ralph-rebind-stale-anchor-'));
+    const fakeBinDir = join(wd, 'fake-bin');
+    const stateDir = join(wd, '.omx', 'state');
+    const tmuxLogPath = join(wd, 'tmux.log');
+    const watcherStatePath = join(stateDir, 'notify-fallback-state.json');
+    const sessionId = 'sess-ralph-rebind';
+    const sessionStateDir = join(stateDir, 'sessions', sessionId);
+    const ralphStatePath = join(sessionStateDir, 'ralph-state.json');
+    const anchorPane = '%99';
+    const livePane = '%42';
+    try {
+      await mkdir(sessionStateDir, { recursive: true });
+      await mkdir(fakeBinDir, { recursive: true });
+      await writeSessionStart(wd, sessionId);
+      const managedSessionName = buildTmuxSessionName(wd, sessionId);
+      await writeFile(join(fakeBinDir, 'tmux'), buildManagedRalphTmux(tmuxLogPath, {
+        cwd: wd,
+        managedSessionName,
+        anchorPane,
+        livePane,
+        codexPanes: [
+          { paneId: anchorPane, active: false, currentCommand: 'sh', startCommand: 'bash' },
+          { paneId: '%41', active: false, currentCommand: 'codex', startCommand: 'codex' },
+          { paneId: livePane, active: true, currentCommand: 'codex', startCommand: 'codex' },
+        ],
+      }));
+      await chmod(join(fakeBinDir, 'tmux'), 0o755);
+      await writeFile(ralphStatePath, JSON.stringify({
+        active: true,
+        current_phase: 'executing',
+        tmux_pane_id: anchorPane,
+      }, null, 2));
+      await writeFile(join(stateDir, 'hud-state.json'), JSON.stringify({
+        last_progress_at: new Date(Date.now() - 61_000).toISOString(),
+      }, null, 2));
+      await writeFile(watcherStatePath, JSON.stringify({
+        ralph_continue_steer: {
+          last_sent_at: new Date(Date.now() - 61_000).toISOString(),
+        },
+      }, null, 2));
+
+      const watcherScript = new URL('../../../dist/scripts/notify-fallback-watcher.js', import.meta.url).pathname;
+      const notifyHook = new URL('../../../dist/scripts/notify-hook.js', import.meta.url).pathname;
+      const run = spawnSync(
+        process.execPath,
+        [watcherScript, '--once', '--cwd', wd, '--notify-script', notifyHook, '--poll-ms', '50'],
+        {
+          encoding: 'utf-8',
+          env: buildCleanNotifyEnv({
+            PATH: `${fakeBinDir}:${process.env.PATH || ''}`,
+          }),
+        },
+      );
+      assert.equal(run.status, 0, run.stderr || run.stdout);
+
+      const persistedRalph = JSON.parse(await readFile(ralphStatePath, 'utf-8'));
+      assert.equal(persistedRalph.tmux_pane_id, livePane);
+      assert.match(persistedRalph.tmux_pane_set_at ?? '', /^\d{4}-\d{2}-\d{2}T/);
+
+      const watcherState = JSON.parse(await readFile(watcherStatePath, 'utf-8'));
+      assert.equal(watcherState.ralph_continue_steer?.last_reason, 'sent');
+      assert.equal(watcherState.ralph_continue_steer?.pane_id, livePane);
+
+      const tmuxLog = await readFile(tmuxLogPath, 'utf8');
+      assert.match(tmuxLog, /send-keys -t %42 -l Ralph loop active continue \[OMX_TMUX_INJECT\]/);
+      assert.doesNotMatch(tmuxLog, /send-keys -t %99 -l Ralph loop active continue \[OMX_TMUX_INJECT\]/);
+    } finally {
+      await rm(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the verified Ralph anchor pane when another codex pane is focused in the same managed session', async () => {
+    const wd = await mkdtemp(join(tmpdir(), 'omx-fallback-ralph-keep-anchor-pane-'));
+    const fakeBinDir = join(wd, 'fake-bin');
+    const stateDir = join(wd, '.omx', 'state');
+    const tmuxLogPath = join(wd, 'tmux.log');
+    const watcherStatePath = join(stateDir, 'notify-fallback-state.json');
+    const sessionId = 'sess-ralph-keep-anchor';
+    const sessionStateDir = join(stateDir, 'sessions', sessionId);
+    const ralphStatePath = join(sessionStateDir, 'ralph-state.json');
+    const anchorPane = '%99';
+    const livePane = '%42';
+    try {
+      await mkdir(sessionStateDir, { recursive: true });
+      await mkdir(fakeBinDir, { recursive: true });
+      await writeSessionStart(wd, sessionId);
+      const managedSessionName = buildTmuxSessionName(wd, sessionId);
+      await writeFile(join(fakeBinDir, 'tmux'), buildManagedRalphTmux(tmuxLogPath, {
+        cwd: wd,
+        managedSessionName,
+        anchorPane,
+        livePane,
+        codexPanes: [
+          { paneId: anchorPane, active: false, currentCommand: 'codex', startCommand: 'codex' },
+          { paneId: livePane, active: true, currentCommand: 'codex', startCommand: 'codex' },
+        ],
+      }));
+      await chmod(join(fakeBinDir, 'tmux'), 0o755);
+      await writeFile(ralphStatePath, JSON.stringify({
+        active: true,
+        current_phase: 'executing',
+        tmux_pane_id: anchorPane,
+      }, null, 2));
+      await writeFile(join(stateDir, 'hud-state.json'), JSON.stringify({
+        last_progress_at: new Date(Date.now() - 61_000).toISOString(),
+      }, null, 2));
+      await writeFile(watcherStatePath, JSON.stringify({
+        ralph_continue_steer: {
+          last_sent_at: new Date(Date.now() - 61_000).toISOString(),
+        },
+      }, null, 2));
+
+      const watcherScript = new URL('../../../dist/scripts/notify-fallback-watcher.js', import.meta.url).pathname;
+      const notifyHook = new URL('../../../dist/scripts/notify-hook.js', import.meta.url).pathname;
+      const run = spawnSync(
+        process.execPath,
+        [watcherScript, '--once', '--cwd', wd, '--notify-script', notifyHook, '--poll-ms', '50'],
+        {
+          encoding: 'utf-8',
+          env: buildCleanNotifyEnv({
+            PATH: `${fakeBinDir}:${process.env.PATH || ''}`,
+          }),
+        },
+      );
+      assert.equal(run.status, 0, run.stderr || run.stdout);
+
+      const persistedRalph = JSON.parse(await readFile(ralphStatePath, 'utf-8'));
+      assert.equal(persistedRalph.tmux_pane_id, anchorPane);
+      assert.equal(typeof persistedRalph.tmux_pane_set_at, 'undefined');
+
+      const watcherState = JSON.parse(await readFile(watcherStatePath, 'utf-8'));
+      assert.equal(watcherState.ralph_continue_steer?.last_reason, 'sent');
+      assert.equal(watcherState.ralph_continue_steer?.pane_id, anchorPane);
+
+      const tmuxLog = await readFile(tmuxLogPath, 'utf8');
+      assert.match(tmuxLog, /send-keys -t %99 -l Ralph loop active continue \[OMX_TMUX_INJECT\]/);
+      assert.doesNotMatch(tmuxLog, /send-keys -t %42 -l Ralph loop active continue \[OMX_TMUX_INJECT\]/);
+    } finally {
+      await rm(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to the current managed session pane when the stored Ralph pane anchor is dead', async () => {
+    const wd = await mkdtemp(join(tmpdir(), 'omx-fallback-ralph-rebind-dead-anchor-'));
+    const fakeBinDir = join(wd, 'fake-bin');
+    const stateDir = join(wd, '.omx', 'state');
+    const tmuxLogPath = join(wd, 'tmux.log');
+    const watcherStatePath = join(stateDir, 'notify-fallback-state.json');
+    const sessionId = 'sess-ralph-dead-anchor';
+    const sessionStateDir = join(stateDir, 'sessions', sessionId);
+    const ralphStatePath = join(sessionStateDir, 'ralph-state.json');
+    const anchorPane = '%99';
+    const livePane = '%42';
+    try {
+      await mkdir(sessionStateDir, { recursive: true });
+      await mkdir(fakeBinDir, { recursive: true });
+      await writeSessionStart(wd, sessionId);
+      const managedSessionName = buildTmuxSessionName(wd, sessionId);
+      await writeFile(join(fakeBinDir, 'tmux'), buildManagedRalphTmux(tmuxLogPath, {
+        cwd: wd,
+        managedSessionName,
+        anchorPane,
+        livePane,
+        codexPanes: [
+          { paneId: '%41', active: false, currentCommand: 'codex', startCommand: 'codex' },
+          { paneId: livePane, active: true, currentCommand: 'codex', startCommand: 'codex' },
+        ],
+        missingAnchor: true,
+      }));
+      await chmod(join(fakeBinDir, 'tmux'), 0o755);
+      await writeFile(ralphStatePath, JSON.stringify({
+        active: true,
+        current_phase: 'executing',
+        tmux_pane_id: anchorPane,
+      }, null, 2));
+      await writeFile(join(stateDir, 'hud-state.json'), JSON.stringify({
+        last_progress_at: new Date(Date.now() - 61_000).toISOString(),
+      }, null, 2));
+      await writeFile(watcherStatePath, JSON.stringify({
+        ralph_continue_steer: {
+          last_sent_at: new Date(Date.now() - 61_000).toISOString(),
+        },
+      }, null, 2));
+
+      const watcherScript = new URL('../../../dist/scripts/notify-fallback-watcher.js', import.meta.url).pathname;
+      const notifyHook = new URL('../../../dist/scripts/notify-hook.js', import.meta.url).pathname;
+      const run = spawnSync(
+        process.execPath,
+        [watcherScript, '--once', '--cwd', wd, '--notify-script', notifyHook, '--poll-ms', '50'],
+        {
+          encoding: 'utf-8',
+          env: buildCleanNotifyEnv({
+            PATH: `${fakeBinDir}:${process.env.PATH || ''}`,
+          }),
+        },
+      );
+      assert.equal(run.status, 0, run.stderr || run.stdout);
+
+      const persistedRalph = JSON.parse(await readFile(ralphStatePath, 'utf-8'));
+      assert.equal(persistedRalph.tmux_pane_id, livePane);
+      assert.match(persistedRalph.tmux_pane_set_at ?? '', /^\d{4}-\d{2}-\d{2}T/);
+
+      const watcherState = JSON.parse(await readFile(watcherStatePath, 'utf-8'));
+      assert.equal(watcherState.ralph_continue_steer?.last_reason, 'sent');
+      assert.equal(watcherState.ralph_continue_steer?.pane_id, livePane);
+
+      const tmuxLog = await readFile(tmuxLogPath, 'utf8');
+      assert.match(tmuxLog, /display-message -p -t %99 #S/);
+      assert.match(tmuxLog, /list-panes -s -t .*sess-ralph-dead-anchor/);
+      assert.match(tmuxLog, /send-keys -t %42 -l Ralph loop active continue \[OMX_TMUX_INJECT\]/);
+      assert.doesNotMatch(tmuxLog, /send-keys -t %99 -l Ralph loop active continue \[OMX_TMUX_INJECT\]/);
+    } finally {
+      await rm(wd, { recursive: true, force: true });
+    }
+  });
+
+  it('waits a full cadence from startup when persisted Ralph steer state is empty', async () => {
+    const wd = await mkdtemp(join(tmpdir(), 'omx-fallback-ralph-startup-cooldown-'));
     const fakeBinDir = join(wd, 'fake-bin');
     const stateDir = join(wd, '.omx', 'state');
     const tmuxLogPath = join(wd, 'tmux.log');

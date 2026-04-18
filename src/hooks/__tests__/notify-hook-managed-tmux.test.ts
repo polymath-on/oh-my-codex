@@ -1,11 +1,37 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildTmuxSessionName } from '../../cli/index.js';
-import { resolveManagedSessionContext, verifyManagedPaneTarget } from '../../scripts/notify-hook/managed-tmux.js';
+import { resolveManagedPaneFromAnchor, resolveManagedSessionContext, verifyManagedPaneTarget } from '../../scripts/notify-hook/managed-tmux.js';
 import { writeSessionStart } from '../session.js';
+
+function readLinuxStartTicks(pid: number): number | null {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf-8');
+    const commandEnd = stat.lastIndexOf(')');
+    if (commandEnd === -1) return null;
+    const remainder = stat.slice(commandEnd + 1).trim();
+    const fields = remainder.split(/\s+/);
+    if (fields.length <= 19) return null;
+    const startTicks = Number(fields[19]);
+    return Number.isFinite(startTicks) ? startTicks : null;
+  } catch {
+    return null;
+  }
+}
+
+function readLinuxCmdline(pid: number): string | null {
+  try {
+    const raw = readFileSync(`/proc/${pid}/cmdline`);
+    const text = raw.toString('utf-8').replace(/\0+/g, ' ').trim();
+    return text.length > 0 ? text : null;
+  } catch {
+    return null;
+  }
+}
 
 describe('notify-hook managed tmux windows fallback', () => {
   async function withFakeTmux(cwd: string, script: string, run: () => Promise<void>): Promise<void> {
@@ -158,6 +184,188 @@ exit 1
       });
     } finally {
       await rm(aliasCwd, { recursive: true, force: true });
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the verified anchor pane instead of rebinding to the active codex pane in the session', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'omx-managed-anchor-pane-'));
+    const originalPath = process.env.PATH;
+    try {
+      const stateDir = join(cwd, '.omx', 'state');
+      const fakeBinDir = join(cwd, 'fake-bin');
+      const fakeTmuxPath = join(fakeBinDir, 'tmux');
+      const sessionId = 'omx-anchor-pane';
+      const managedSessionName = buildTmuxSessionName(cwd, sessionId);
+
+      await mkdir(stateDir, { recursive: true });
+      await mkdir(fakeBinDir, { recursive: true });
+      await writeFile(join(stateDir, 'session.json'), JSON.stringify({
+        session_id: sessionId,
+        started_at: new Date().toISOString(),
+        cwd,
+        pid: process.pid,
+        platform: process.platform,
+        pid_start_ticks: readLinuxStartTicks(process.pid),
+        pid_cmdline: readLinuxCmdline(process.pid),
+      }, null, 2));
+
+      const fakeTmux = `#!/usr/bin/env bash
+set -eu
+cmd="$1"
+shift || true
+if [[ "$cmd" == "display-message" ]]; then
+  target=""
+  format=""
+  while (($#)); do
+    case "$1" in
+      -p) shift ;;
+      -t) target="$2"; shift 2 ;;
+      *) format="$1"; shift ;;
+    esac
+  done
+  if [[ -z "$target" && "$format" == "#S" ]]; then
+    echo "${managedSessionName}"
+    exit 0
+  fi
+  if [[ "$format" == "#{pane_current_command}" && "$target" == "%42" ]]; then
+    echo "codex"
+    exit 0
+  fi
+  if [[ "$format" == "#{pane_start_command}" && "$target" == "%42" ]]; then
+    echo "codex"
+    exit 0
+  fi
+  if [[ "$format" == "#S" && "$target" == "%42" ]]; then
+    echo "${managedSessionName}"
+    exit 0
+  fi
+  echo "unsupported display target: $target / $format" >&2
+  exit 1
+fi
+if [[ "$cmd" == "list-panes" ]]; then
+  target=""
+  while (($#)); do
+    case "$1" in
+      -s) shift ;;
+      -t) target="$2"; shift 2 ;;
+      -F) shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  if [[ "$target" == "${managedSessionName}" ]]; then
+    printf "%%42\\t0\\tcodex\\tcodex\\n%%55\\t1\\tcodex\\tcodex\\n"
+    exit 0
+  fi
+  echo "unexpected list-panes target: $target" >&2
+  exit 1
+fi
+echo "unsupported cmd: $cmd" >&2
+exit 1
+`;
+      await writeFile(fakeTmuxPath, fakeTmux);
+      await chmod(fakeTmuxPath, 0o755);
+
+      process.env.PATH = `${fakeBinDir}:${originalPath || ''}`;
+      process.env.TMUX = '1';
+      delete process.env.TMUX_PANE;
+      process.env.OMX_TEAM_WORKER = '';
+
+      const paneId = await resolveManagedPaneFromAnchor('%42', cwd, { session_id: sessionId }, { allowTeamWorker: false });
+      assert.equal(paneId, '%42');
+    } finally {
+      process.env.PATH = originalPath;
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('rebinds a node shell anchor to the live codex pane in the managed session', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'omx-managed-node-shell-anchor-'));
+    const originalPath = process.env.PATH;
+    try {
+      const stateDir = join(cwd, '.omx', 'state');
+      const fakeBinDir = join(cwd, 'fake-bin');
+      const fakeTmuxPath = join(fakeBinDir, 'tmux');
+      const sessionId = 'omx-node-shell-anchor';
+      const managedSessionName = buildTmuxSessionName(cwd, sessionId);
+
+      await mkdir(stateDir, { recursive: true });
+      await mkdir(fakeBinDir, { recursive: true });
+      await writeFile(join(stateDir, 'session.json'), JSON.stringify({
+        session_id: sessionId,
+        started_at: new Date().toISOString(),
+        cwd,
+        pid: process.pid,
+        platform: process.platform,
+        pid_start_ticks: readLinuxStartTicks(process.pid),
+        pid_cmdline: readLinuxCmdline(process.pid),
+      }, null, 2));
+
+      const fakeTmux = `#!/usr/bin/env bash
+set -eu
+cmd="$1"
+shift || true
+if [[ "$cmd" == "display-message" ]]; then
+  target=""
+  format=""
+  while (($#)); do
+    case "$1" in
+      -p) shift ;;
+      -t) target="$2"; shift 2 ;;
+      *) format="$1"; shift ;;
+    esac
+  done
+  if [[ -z "$target" && "$format" == "#S" ]]; then
+    echo "${managedSessionName}"
+    exit 0
+  fi
+  if [[ "$format" == "#{pane_current_command}" && "$target" == "%42" ]]; then
+    echo "node"
+    exit 0
+  fi
+  if [[ "$format" == "#{pane_start_command}" && "$target" == "%42" ]]; then
+    echo "bash"
+    exit 0
+  fi
+  if [[ "$format" == "#S" && "$target" == "%42" ]]; then
+    echo "${managedSessionName}"
+    exit 0
+  fi
+  echo "unsupported display target: $target / $format" >&2
+  exit 1
+fi
+if [[ "$cmd" == "list-panes" ]]; then
+  target=""
+  while (($#)); do
+    case "$1" in
+      -s) shift ;;
+      -t) target="$2"; shift 2 ;;
+      -F) shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  if [[ "$target" == "${managedSessionName}" ]]; then
+    printf "%%42\\t0\\tnode\\tbash\\n%%55\\t1\\tcodex\\tcodex\\n"
+    exit 0
+  fi
+  echo "unexpected list-panes target: $target" >&2
+  exit 1
+fi
+echo "unsupported cmd: $cmd" >&2
+exit 1
+`;
+      await writeFile(fakeTmuxPath, fakeTmux);
+      await chmod(fakeTmuxPath, 0o755);
+
+      process.env.PATH = `${fakeBinDir}:${originalPath || ''}`;
+      process.env.TMUX = '1';
+      delete process.env.TMUX_PANE;
+      process.env.OMX_TEAM_WORKER = '';
+
+      const paneId = await resolveManagedPaneFromAnchor('%42', cwd, { session_id: sessionId }, { allowTeamWorker: false });
+      assert.equal(paneId, '%55');
+    } finally {
+      process.env.PATH = originalPath;
       await rm(cwd, { recursive: true, force: true });
     }
   });
