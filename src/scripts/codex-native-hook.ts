@@ -265,17 +265,19 @@ async function readActiveRalphState(
   stateDir: string,
   preferredSessionId?: string,
 ): Promise<Record<string, unknown> | null> {
-  const sessionInfo = await readUsableSessionState(resolve(stateDir, "..", ".."));
+  const cwd = resolve(stateDir, "..", "..");
+  const sessionInfo = await readUsableSessionState(cwd);
   const currentOmxSessionId = safeString(sessionInfo?.session_id).trim();
   const sessionCandidates = [...new Set([
     safeString(preferredSessionId).trim(),
     currentOmxSessionId,
   ].filter(Boolean))];
 
+  // Ralph Stop stays authoritative-scope-only once the Stop payload is session-bound.
+  // That is intentionally stricter than generic state MCP reads: do not scan sibling
+  // session scopes or fall back to root when a current/explicit session is in play.
   for (const sessionId of sessionCandidates) {
-    const sessionScoped = await readJsonIfExists(
-      join(stateDir, "sessions", sessionId, "ralph-state.json"),
-    );
+    const sessionScoped = await readStopSessionPinnedState("ralph-state.json", cwd, sessionId);
     if (sessionScoped?.active === true && shouldContinueRun(sessionScoped)) {
       return sessionScoped;
     }
@@ -286,17 +288,6 @@ async function readActiveRalphState(
   const direct = await readJsonIfExists(join(stateDir, "ralph-state.json"));
   if (direct?.active === true && shouldContinueRun(direct)) {
     return direct;
-  }
-
-  const sessionsRoot = join(stateDir, "sessions");
-  if (!existsSync(sessionsRoot)) return null;
-  const entries = await readdir(sessionsRoot, { withFileTypes: true }).catch(() => []);
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const candidate = await readJsonIfExists(join(sessionsRoot, entry.name, "ralph-state.json"));
-    if (candidate?.active === true && shouldContinueRun(candidate)) {
-      return candidate;
-    }
   }
 
   return null;
