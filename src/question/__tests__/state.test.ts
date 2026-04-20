@@ -7,6 +7,8 @@ import {
   createQuestionRecord,
   getQuestionRecordPath,
   markQuestionAnswered,
+  markQuestionPrompting,
+  markQuestionTerminalError,
   readQuestionRecord,
   waitForQuestionTerminalState,
 } from '../state.js';
@@ -64,5 +66,33 @@ describe('question state', () => {
     const finalRecord = await waiter;
     assert.equal(finalRecord.answer?.value, 'custom text');
     assert.equal(finalRecord.status, 'answered');
+  });
+
+  it('persists explicit terminal errors after prompting begins', async () => {
+    const cwd = await makeRepo();
+    const { recordPath } = await createQuestionRecord(cwd, {
+      question: 'Pick one',
+      options: [{ label: 'A', value: 'a' }],
+      allow_other: true,
+      other_label: 'Other',
+      multi_select: false,
+    }, 'sess-3');
+
+    await markQuestionPrompting(recordPath, {
+      renderer: 'tmux-pane',
+      target: '%42',
+      launched_at: new Date().toISOString(),
+    });
+    await markQuestionTerminalError(
+      recordPath,
+      'error',
+      'question_runtime_failed',
+      'Question UI pane %42 disappeared immediately after launch.',
+    );
+
+    const loaded = await readQuestionRecord(recordPath);
+    assert.equal(loaded?.status, 'error');
+    assert.equal(loaded?.error?.code, 'question_runtime_failed');
+    assert.match(loaded?.error?.message || '', /pane %42 disappeared immediately after launch/);
   });
 });

@@ -23,6 +23,7 @@ export type SleepSync = (ms: number) => void;
 
 const QUESTION_TEXT_SETTLE_MS = 120;
 const QUESTION_SUBMIT_REPEAT_DELAY_MS = 100;
+const QUESTION_RENDERER_PANE_SETTLE_MS = 120;
 
 function safeString(value: unknown): string {
   return typeof value === 'string' ? value : '';
@@ -42,10 +43,21 @@ export function resolveQuestionRendererStrategy(
   return 'unsupported';
 }
 
-function buildQuestionUiCommand(recordPath: string, sessionId?: string): string {
-  const omxBin = resolveOmxCliEntryPath() || process.argv[1];
+function buildQuestionUiCommand(
+  recordPath: string,
+  options: {
+    cwd: string;
+    env?: NodeJS.ProcessEnv;
+    sessionId?: string;
+  },
+): string {
+  const omxBin = resolveOmxCliEntryPath({
+    argv1: process.argv[1],
+    cwd: options.cwd,
+    env: options.env,
+  }) || process.argv[1];
   if (!omxBin) throw new Error('Unable to resolve OMX CLI entry path for question UI launch.');
-  const sessionPrefix = sessionId ? `OMX_SESSION_ID=${shellEscapeSingle(sessionId)} ` : '';
+  const sessionPrefix = options.sessionId ? `OMX_SESSION_ID=${shellEscapeSingle(options.sessionId)} ` : '';
   return `${sessionPrefix}${shellEscapeSingle(process.execPath)} ${shellEscapeSingle(omxBin)} question --ui --state-path ${shellEscapeSingle(recordPath)}`;
 }
 
@@ -63,6 +75,21 @@ function resolveReturnTarget(env: NodeJS.ProcessEnv = process.env): string | und
   if (isPaneId(envPane)) return envPane;
   const detectedPane = getCurrentTmuxPaneId();
   return isPaneId(detectedPane) ? detectedPane : undefined;
+}
+
+function isLaunchedQuestionPaneAlive(
+  paneId: string,
+  execTmux: ExecTmuxSync,
+): boolean {
+  if (!isPaneId(paneId)) return false;
+  try {
+    const status = execTmux(['list-panes', '-t', paneId, '-F', '#{pane_dead}\t#{pane_id}']);
+    const firstLine = status.split('\n')[0]?.trim() || '';
+    const [paneDead = '', resolvedPaneId = ''] = firstLine.split('\t');
+    return paneDead !== '1' && resolvedPaneId === paneId;
+  } catch {
+    return false;
+  }
 }
 
 export function formatQuestionAnswerForInjection(answer: QuestionAnswer): string {
@@ -102,12 +129,18 @@ export function launchQuestionRenderer(
   deps: {
     strategy?: QuestionRendererStrategy;
     execTmux?: ExecTmuxSync;
+    sleepSync?: SleepSync;
   } = {},
 ): QuestionRendererState {
   const strategy = deps.strategy ?? resolveQuestionRendererStrategy(options.env ?? process.env);
   const execTmux = deps.execTmux ?? defaultExecTmux;
+  const sleepImpl = deps.sleepSync ?? sleepSync;
   const launchedAt = options.nowIso ?? new Date().toISOString();
-  const command = buildQuestionUiCommand(options.recordPath, options.sessionId);
+  const command = buildQuestionUiCommand(options.recordPath, {
+    cwd: options.cwd,
+    env: options.env,
+    sessionId: options.sessionId,
+  });
 
   if (strategy === 'inside-tmux') {
     const rawPane = execTmux([
@@ -124,6 +157,10 @@ export function launchQuestionRenderer(
     ]);
     const paneId = parsePaneIdFromTmuxOutput(rawPane);
     if (!paneId) throw new Error('Failed to create tmux split pane for omx question UI.');
+    sleepImpl(QUESTION_RENDERER_PANE_SETTLE_MS);
+    if (!isLaunchedQuestionPaneAlive(paneId, execTmux)) {
+      throw new Error(`Question UI pane ${paneId} disappeared immediately after launch.`);
+    }
     const returnTarget = resolveReturnTarget(options.env ?? process.env);
     return {
       renderer: 'tmux-pane',
