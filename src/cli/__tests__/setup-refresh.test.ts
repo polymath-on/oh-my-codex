@@ -250,8 +250,13 @@ describe("omx setup refresh summary and dry-run behavior", () => {
       assert.equal(promptCalls, 1);
       assert.match(config, /^model = "gpt-5\.4"$/m);
       assert.doesNotMatch(config, /^model = "gpt-5\.3-codex"$/m);
-      assert.match(config, /^model_context_window = 1000000$/m);
-      assert.match(config, /^model_auto_compact_token_limit = 900000$/m);
+      assert.match(
+        config,
+        /^# oh-my-codex seeded behavioral defaults \(uninstall removes unchanged defaults\)$/m,
+      );
+      assert.match(config, /^model_context_window = 250000$/m);
+      assert.match(config, /^model_auto_compact_token_limit = 200000$/m);
+      assert.match(config, /^# End oh-my-codex seeded behavioral defaults$/m);
     } finally {
       await rm(wd, { recursive: true, force: true });
     }
@@ -275,8 +280,8 @@ describe("omx setup refresh summary and dry-run behavior", () => {
       const config = await readFile(join(wd, ".codex", "config.toml"), "utf-8");
       assert.match(config, /^model = "gpt-5\.3-codex"$/m);
       assert.doesNotMatch(config, /^model = "gpt-5\.4"$/m);
-      assert.doesNotMatch(config, /^model_context_window = 1000000$/m);
-      assert.doesNotMatch(config, /^model_auto_compact_token_limit = 900000$/m);
+      assert.doesNotMatch(config, /^model_context_window = 250000$/m);
+      assert.doesNotMatch(config, /^model_auto_compact_token_limit = 200000$/m);
     } finally {
       await rm(wd, { recursive: true, force: true });
     }
@@ -297,8 +302,8 @@ describe("omx setup refresh summary and dry-run behavior", () => {
       const config = await readFile(join(wd, ".codex", "config.toml"), "utf-8");
       assert.match(config, /^model = "gpt-5\.3-codex"$/m);
       assert.doesNotMatch(config, /^model = "gpt-5\.4"$/m);
-      assert.doesNotMatch(config, /^model_context_window = 1000000$/m);
-      assert.doesNotMatch(config, /^model_auto_compact_token_limit = 900000$/m);
+      assert.doesNotMatch(config, /^model_context_window = 250000$/m);
+      assert.doesNotMatch(config, /^model_auto_compact_token_limit = 200000$/m);
     } finally {
       await rm(wd, { recursive: true, force: true });
     }

@@ -42,9 +42,16 @@ describe('runDeepInterviewQuestion', () => {
 
     const runner: OmxQuestionProcessRunner = async () => {
       const inFlightState = JSON.parse(await readFile(statePath, 'utf-8')) as {
-        question_enforcement?: { status?: string };
+        question_enforcement?: { status?: string; lifecycle_outcome?: string };
+        lifecycle_outcome?: string;
+        run_outcome?: string;
+        active?: boolean;
       };
       inFlightQuestionStatus = inFlightState.question_enforcement?.status ?? '';
+      assert.equal(inFlightState.question_enforcement?.lifecycle_outcome, 'askuserQuestion');
+      assert.equal(inFlightState.lifecycle_outcome, 'askuserQuestion');
+      assert.equal(inFlightState.run_outcome, 'blocked_on_user');
+      assert.equal(inFlightState.active, false);
       return {
         code: 0,
         stdout: JSON.stringify({
@@ -87,17 +94,23 @@ describe('runDeepInterviewQuestion', () => {
     assert.equal(inFlightQuestionStatus, 'pending');
 
     const finalState = JSON.parse(await readFile(statePath, 'utf-8')) as {
+      lifecycle_outcome?: string;
       question_enforcement?: {
         obligation_id?: string;
+        lifecycle_outcome?: string;
         status?: string;
         question_id?: string;
         satisfied_at?: string;
       };
+      run_outcome?: string;
     };
     assert.equal(finalState.question_enforcement?.status, 'satisfied');
+    assert.equal(finalState.question_enforcement?.lifecycle_outcome, 'askuserQuestion');
     assert.equal(finalState.question_enforcement?.question_id, 'question-1');
     assert.ok(finalState.question_enforcement?.obligation_id);
     assert.ok(finalState.question_enforcement?.satisfied_at);
+    assert.equal(finalState.lifecycle_outcome, undefined);
+    assert.equal(finalState.run_outcome, undefined);
   });
 
   it('clears the pending obligation when omx question fails after being attempted', async () => {
@@ -135,14 +148,20 @@ describe('runDeepInterviewQuestion', () => {
     );
 
     const finalState = JSON.parse(await readFile(statePath, 'utf-8')) as {
+      lifecycle_outcome?: string;
       question_enforcement?: {
+        lifecycle_outcome?: string;
         status?: string;
         clear_reason?: string;
         cleared_at?: string;
       };
+      run_outcome?: string;
     };
     assert.equal(finalState.question_enforcement?.status, 'cleared');
+    assert.equal(finalState.question_enforcement?.lifecycle_outcome, 'askuserQuestion');
     assert.equal(finalState.question_enforcement?.clear_reason, 'error');
     assert.ok(finalState.question_enforcement?.cleared_at);
+    assert.equal(finalState.lifecycle_outcome, undefined);
+    assert.equal(finalState.run_outcome, undefined);
   });
 });

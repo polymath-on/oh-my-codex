@@ -2,6 +2,7 @@ import { execFileSync } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import { mkdir, readFile, readdir, writeFile } from "fs/promises";
 import { join, resolve } from "path";
+import { pathToFileURL } from "url";
 import { readModeState, readModeStateForSession, updateModeState } from "../modes/base.js";
 import {
   listActiveSkills,
@@ -9,7 +10,12 @@ import {
 } from "../state/skill-active.js";
 import { readSubagentSessionSummary } from "../subagents/tracker.js";
 import { resolveCanonicalTeamStateRoot } from "../team/state-root.js";
-import { readUsableSessionState, reconcileNativeSessionStart } from "../hooks/session.js";
+import {
+  isSessionStateUsable,
+  readSessionState,
+  readUsableSessionState,
+  reconcileNativeSessionStart,
+} from "../hooks/session.js";
 import {
   appendTeamEvent,
   readTeamLeaderAttention,
@@ -43,6 +49,7 @@ import {
 import type { HookEventEnvelope } from "../hooks/extensibility/types.js";
 import { dispatchHookEvent } from "../hooks/extensibility/dispatcher.js";
 import { reconcileHudForPromptSubmit } from "../hud/reconcile.js";
+import { shellEscapeSingle } from "../hud/tmux.js";
 import { onSessionStart as buildWikiSessionStartContext } from "../wiki/lifecycle.js";
 import { readAutoresearchCompletionStatus, readAutoresearchModeState } from "../autoresearch/skill-validation.js";
 import { shouldContinueRun } from "../runtime/run-loop.js";
@@ -56,6 +63,7 @@ import {
   type TriageStateFile,
 } from "../hooks/triage-state.js";
 import { isPendingDeepInterviewQuestionEnforcement } from "../question/deep-interview.js";
+import { resolveOmxCliEntryPath } from "../utils/paths.js";
 
 type CodexHookEventName =
   | "SessionStart"
@@ -203,15 +211,26 @@ function readPromptText(payload: CodexHookPayload): string {
 function sanitizePayloadForHookContext(
   payload: CodexHookPayload,
   hookEventName: CodexHookEventName,
+  canonicalSessionId = "",
 ): CodexHookPayload {
-  if (hookEventName !== "UserPromptSubmit") return payload;
-
   const sanitized = { ...payload };
-  delete sanitized.prompt;
-  delete sanitized.input;
-  delete sanitized.user_prompt;
-  delete sanitized.userPrompt;
-  delete sanitized.text;
+
+  if (hookEventName === "UserPromptSubmit") {
+    delete sanitized.prompt;
+    delete sanitized.input;
+    delete sanitized.user_prompt;
+    delete sanitized.userPrompt;
+    delete sanitized.text;
+    return sanitized;
+  }
+
+  if (hookEventName === "Stop") {
+    delete sanitized.stop_hook_active;
+    delete sanitized.stopHookActive;
+    delete sanitized.sessionId;
+    sanitized.session_id = canonicalSessionId.trim() || safeString(payload.session_id ?? payload.sessionId).trim();
+  }
+
   return sanitized;
 }
 
@@ -219,13 +238,14 @@ function buildBaseContext(
   cwd: string,
   payload: CodexHookPayload,
   hookEventName: CodexHookEventName,
+  canonicalSessionId = "",
 ): Record<string, unknown> {
   return {
     cwd,
     project_path: cwd,
     transcript_path: safeString(payload.transcript_path ?? payload.transcriptPath) || null,
     source: safeString(payload.source),
-    payload: sanitizePayloadForHookContext(payload, hookEventName),
+    payload: sanitizePayloadForHookContext(payload, hookEventName, canonicalSessionId),
   };
 }
 
@@ -264,17 +284,28 @@ async function readActiveRalphState(
   stateDir: string,
   preferredSessionId?: string,
 ): Promise<Record<string, unknown> | null> {
-  const sessionInfo = await readUsableSessionState(resolve(stateDir, "..", ".."));
-  const currentOmxSessionId = safeString(sessionInfo?.session_id).trim();
+  const cwd = resolve(stateDir, "..", "..");
+  const [rawSessionInfo, usableSessionInfo] = await Promise.all([
+    readSessionState(cwd),
+    readUsableSessionState(cwd),
+  ]);
+  const currentOmxSessionId = safeString(usableSessionInfo?.session_id).trim();
+  const staleCurrentSessionId = rawSessionInfo && !isSessionStateUsable(rawSessionInfo, cwd)
+    ? safeString(rawSessionInfo.session_id).trim()
+    : "";
   const sessionCandidates = [...new Set([
     safeString(preferredSessionId).trim(),
     currentOmxSessionId,
   ].filter(Boolean))];
 
+  // Ralph Stop stays authoritative-scope-only once the Stop payload is session-bound.
+  // That is intentionally stricter than generic state MCP reads: do not scan sibling
+  // session scopes or fall back to root when a current/explicit session is in play.
   for (const sessionId of sessionCandidates) {
-    const sessionScoped = await readJsonIfExists(
-      join(stateDir, "sessions", sessionId, "ralph-state.json"),
-    );
+    if (staleCurrentSessionId && sessionId === staleCurrentSessionId) {
+      continue;
+    }
+    const sessionScoped = await readStopSessionPinnedState("ralph-state.json", cwd, sessionId);
     if (sessionScoped?.active === true && shouldContinueRun(sessionScoped)) {
       return sessionScoped;
     }
@@ -285,17 +316,6 @@ async function readActiveRalphState(
   const direct = await readJsonIfExists(join(stateDir, "ralph-state.json"));
   if (direct?.active === true && shouldContinueRun(direct)) {
     return direct;
-  }
-
-  const sessionsRoot = join(stateDir, "sessions");
-  if (!existsSync(sessionsRoot)) return null;
-  const entries = await readdir(sessionsRoot, { withFileTypes: true }).catch(() => []);
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const candidate = await readJsonIfExists(join(sessionsRoot, entry.name, "ralph-state.json"));
-    if (candidate?.active === true && shouldContinueRun(candidate)) {
-      return candidate;
-    }
   }
 
   return null;
@@ -399,32 +419,55 @@ function resolveSessionOwnerPid(payload: CodexHookPayload): number {
   return process.pid;
 }
 
-async function ensureOmxGitignoreEntry(cwd: string): Promise<{ changed: boolean; gitignorePath?: string }> {
-  let repoRoot = "";
+function tryReadGitValue(cwd: string, args: string[]): string | null {
   try {
-    repoRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+    const value = execFileSync("git", args, {
       cwd,
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "ignore"],
       windowsHide: true,
     }).trim();
+    return value || null;
   } catch {
+    return null;
+  }
+}
+
+function isPathIgnoredByGit(cwd: string, path: string): boolean {
+  try {
+    execFileSync("git", ["check-ignore", "-q", path], {
+      cwd,
+      stdio: ["ignore", "ignore", "ignore"],
+      windowsHide: true,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function ensureOmxLocalIgnoreEntry(cwd: string): Promise<{ changed: boolean; excludePath?: string }> {
+  const repoRoot = tryReadGitValue(cwd, ["rev-parse", "--show-toplevel"]);
+  if (!repoRoot) return { changed: false };
+  if (isPathIgnoredByGit(repoRoot, ".omx/")) {
     return { changed: false };
   }
-  if (!repoRoot) return { changed: false };
 
-  const gitignorePath = join(repoRoot, ".gitignore");
-  const existing = existsSync(gitignorePath)
-    ? await readFile(gitignorePath, "utf-8")
+  const excludePathValue = tryReadGitValue(repoRoot, ["rev-parse", "--git-path", "info/exclude"]);
+  if (!excludePathValue) return { changed: false };
+  const excludePath = resolve(repoRoot, excludePathValue);
+
+  const existing = existsSync(excludePath)
+    ? await readFile(excludePath, "utf-8")
     : "";
   const lines = existing.split(/\r?\n/).map((line) => line.trim());
   if (lines.includes(".omx/")) {
-    return { changed: false, gitignorePath };
+    return { changed: false, excludePath };
   }
 
   const next = `${existing}${existing.endsWith("\n") || existing.length === 0 ? "" : "\n"}.omx/\n`;
-  await writeFile(gitignorePath, next);
-  return { changed: true, gitignorePath };
+  await writeFile(excludePath, next);
+  return { changed: true, excludePath };
 }
 
 async function buildSessionStartContext(
@@ -433,9 +476,9 @@ async function buildSessionStartContext(
 ): Promise<string | null> {
   const sections: string[] = [];
 
-  const gitignoreResult = await ensureOmxGitignoreEntry(cwd);
-  if (gitignoreResult.changed) {
-    sections.push(`Added .omx/ to ${gitignoreResult.gitignorePath} to keep local OMX state out of source control.`);
+  const localIgnoreResult = await ensureOmxLocalIgnoreEntry(cwd);
+  if (localIgnoreResult.changed) {
+    sections.push(`Added .omx/ to ${localIgnoreResult.excludePath} to keep local OMX state out of source control without mutating tracked repo ignores.`);
   }
 
   const modeSummaries: string[] = [];
@@ -523,7 +566,17 @@ async function buildSessionStartContext(
   return sections.length > 0 ? sections.join("\n\n") : null;
 }
 
-function buildAdditionalContextMessage(prompt: string, skillState?: SkillActiveState | null): string | null {
+function buildDeepInterviewQuestionBridgeInstruction(cwd: string): string {
+  const omxBin = resolveOmxCliEntryPath({ cwd }) || process.argv[1] || "omx";
+  const bridgeCommand = `${shellEscapeSingle(process.execPath)} ${shellEscapeSingle(omxBin)} question`;
+  return `Deep-interview must ask each interview round via \`omx question\`; do not fall back to \`request_user_input\` or plain-text questioning. If bare \`omx question\` is unavailable in this reused session, use the current-session CLI bridge command: \`${bridgeCommand}\`. Stop remains blocked while a deep-interview question obligation is pending.`;
+}
+
+function buildAdditionalContextMessage(
+  prompt: string,
+  skillState?: SkillActiveState | null,
+  cwd: string = process.cwd(),
+): string | null {
   if (!prompt) return null;
   const promptPriorityMessage = buildPromptPriorityMessage(prompt);
   const matches = detectKeywords(prompt);
@@ -543,7 +596,7 @@ function buildAdditionalContextMessage(prompt: string, skillState?: SkillActiveS
     ? "Prompt-side `$ralph` activation seeds Ralph workflow state only; it does not invoke `omx ralph`. Use `omx ralph --prd ...` only when you explicitly want the PRD-gated CLI startup path."
     : null;
   const deepInterviewPromptActivationNote = skillState?.initialized_mode === "deep-interview"
-    ? "Deep-interview must ask each interview round via `omx question`; do not fall back to `request_user_input` or plain-text questioning. Stop remains blocked while a deep-interview question obligation is pending."
+    ? buildDeepInterviewQuestionBridgeInstruction(cwd)
     : null;
   const combinedTransitionMessage = (() => {
     if (!skillState?.transition_message) return null;
@@ -997,7 +1050,11 @@ async function buildDeepInterviewQuestionStopOutput(
   threadId: string,
 ): Promise<{ output: Record<string, unknown>; obligationId: string } | null> {
   const modeState = await readStopSessionPinnedState("deep-interview-state.json", cwd, sessionId);
-  if (!modeState || modeState.active !== true) return null;
+  if (!modeState) return null;
+
+  const questionEnforcement = safeObject(modeState.question_enforcement);
+  const hasPendingQuestionObligation = isPendingDeepInterviewQuestionEnforcement(questionEnforcement);
+  if (modeState.active !== true && !hasPendingQuestionObligation) return null;
 
   const phase = formatPhase(modeState.current_phase, "planning");
   if (TERMINAL_MODE_PHASES.has(phase.toLowerCase()) || phase === "completing") {
@@ -1013,8 +1070,7 @@ async function buildDeepInterviewQuestionStopOutput(
     if (!blocker) return null;
   }
 
-  const questionEnforcement = safeObject(modeState.question_enforcement);
-  if (!isPendingDeepInterviewQuestionEnforcement(questionEnforcement)) {
+  if (!hasPendingQuestionObligation) {
     return null;
   }
 
@@ -1148,6 +1204,7 @@ async function returnPersistentStopBlock(
   signatureValue: string,
   output: Record<string, unknown> | null,
   canonicalSessionId?: string,
+  options: { allowRepeatDuringStopHook?: boolean } = { allowRepeatDuringStopHook: true },
 ): Promise<Record<string, unknown> | null> {
   return await maybeReturnRepeatableStopOutput(
     payload,
@@ -1155,7 +1212,7 @@ async function returnPersistentStopBlock(
     buildRepeatableStopSignature(payload, signatureKind, signatureValue, canonicalSessionId),
     output,
     canonicalSessionId,
-    { allowRepeatDuringStopHook: true },
+    options,
   );
 }
 
@@ -1438,6 +1495,7 @@ async function buildStopHookOutput(
         safeString(ultraworkOutput.stopReason),
         ultraworkOutput,
         canonicalSessionId,
+        { allowRepeatDuringStopHook: false },
       );
     }
 
@@ -1587,19 +1645,37 @@ export async function dispatchCodexNativeHook(
   const nativeSessionId = safeString(payload.session_id ?? payload.sessionId).trim();
   const threadId = safeString(payload.thread_id ?? payload.threadId).trim();
   const turnId = safeString(payload.turn_id ?? payload.turnId).trim();
-  let canonicalSessionId = safeString((await readUsableSessionState(cwd))?.session_id).trim();
+  const currentSessionState = await readUsableSessionState(cwd);
+  let canonicalSessionId = safeString(currentSessionState?.session_id).trim();
+  let resolvedNativeSessionId = nativeSessionId;
 
   if (hookEventName === "SessionStart" && nativeSessionId) {
     const sessionState = await reconcileNativeSessionStart(cwd, nativeSessionId, {
       pid: options.sessionOwnerPid ?? resolveSessionOwnerPid(payload),
     });
     canonicalSessionId = safeString(sessionState.session_id).trim();
+    resolvedNativeSessionId = safeString(sessionState.native_session_id).trim() || nativeSessionId;
   } else if (!canonicalSessionId) {
-    canonicalSessionId = safeString((await readUsableSessionState(cwd))?.session_id).trim();
+    canonicalSessionId = safeString(currentSessionState?.session_id).trim();
+  }
+
+  if (hookEventName === "Stop") {
+    const stopCanonicalSessionId = await resolveInternalSessionIdForPayload(
+      cwd,
+      readPayloadSessionId(payload),
+    );
+    if (stopCanonicalSessionId) {
+      canonicalSessionId = stopCanonicalSessionId;
+    }
+    if (canonicalSessionId && safeString(currentSessionState?.session_id).trim() === canonicalSessionId) {
+      resolvedNativeSessionId =
+        safeString(currentSessionState?.native_session_id).trim() || resolvedNativeSessionId;
+    }
   }
 
   const eventSessionId = canonicalSessionId || nativeSessionId || undefined;
   const sessionIdForState = canonicalSessionId || nativeSessionId;
+  let outputJson: Record<string, unknown> | null = null;
 
   if (hookEventName === "UserPromptSubmit") {
     const prompt = readPromptText(payload);
@@ -1684,10 +1760,10 @@ export async function dispatchCodexNativeHook(
   }
 
   if (omxEventName) {
-    const baseContext = buildBaseContext(cwd, payload, hookEventName!);
-    if (nativeSessionId) {
-      baseContext.native_session_id = nativeSessionId;
-      baseContext.codex_session_id = nativeSessionId;
+    const baseContext = buildBaseContext(cwd, payload, hookEventName!, canonicalSessionId);
+    if (resolvedNativeSessionId) {
+      baseContext.native_session_id = resolvedNativeSessionId;
+      baseContext.codex_session_id = resolvedNativeSessionId;
     }
     if (canonicalSessionId) {
       baseContext.omx_session_id = canonicalSessionId;
@@ -1705,11 +1781,10 @@ export async function dispatchCodexNativeHook(
     await dispatchHookEvent(event, { cwd });
   }
 
-  let outputJson: Record<string, unknown> | null = null;
   if (hookEventName === "SessionStart" || hookEventName === "UserPromptSubmit") {
     const additionalContext = hookEventName === "SessionStart"
       ? await buildSessionStartContext(cwd, canonicalSessionId || nativeSessionId)
-      : (buildAdditionalContextMessage(readPromptText(payload), skillState) ?? triageAdditionalContext);
+      : (buildAdditionalContextMessage(readPromptText(payload), skillState, cwd) ?? triageAdditionalContext);
     if (additionalContext) {
       outputJson = {
         hookSpecificOutput: {
@@ -1740,6 +1815,14 @@ export async function dispatchCodexNativeHook(
 interface NativeHookCliReadResult {
   payload: CodexHookPayload;
   parseError: Error | null;
+}
+
+export function isCodexNativeHookMainModule(
+  moduleUrl: string,
+  argv1: string | undefined,
+): boolean {
+  if (!argv1) return false;
+  return moduleUrl === pathToFileURL(argv1).href;
 }
 
 async function readStdinJson(): Promise<NativeHookCliReadResult> {
@@ -1786,7 +1869,7 @@ export async function runCodexNativeHookCli(): Promise<void> {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isCodexNativeHookMainModule(import.meta.url, process.argv[1])) {
   runCodexNativeHookCli().catch((error) => {
     process.stderr.write(
       `[omx] codex-native-hook failed: ${

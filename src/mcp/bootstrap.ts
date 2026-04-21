@@ -16,7 +16,6 @@ const LIFECYCLE_DEBUG_ENV = 'OMX_MCP_TRANSPORT_DEBUG';
 const PARENT_WATCHDOG_INTERVAL_MS = 25;
 const DUPLICATE_SIBLING_WATCHDOG_INTERVAL_MS = 5_000;
 const DUPLICATE_SIBLING_PRE_TRAFFIC_GRACE_MS = 2_000;
-const DUPLICATE_SIBLING_POST_TRAFFIC_IDLE_MS = 300_000;
 const MCP_ENTRYPOINT_PATTERN = /\b([a-z0-9-]+-server\.(?:[cm]?js|ts))\b/i;
 
 interface StdioLifecycleServer {
@@ -159,7 +158,6 @@ export function shouldSelfExitForDuplicateSibling(
   duplicateObservedAtMs: number | null,
   lastTrafficAtMs: number | null,
   preTrafficGraceMs = DUPLICATE_SIBLING_PRE_TRAFFIC_GRACE_MS,
-  postTrafficIdleMs = DUPLICATE_SIBLING_POST_TRAFFIC_IDLE_MS,
 ): boolean {
   if (observation.status !== 'older_duplicate') {
     return false;
@@ -171,13 +169,7 @@ export function shouldSelfExitForDuplicateSibling(
   if (lastTrafficAtMs === null) {
     return nowMs - duplicateObservedAtMs >= preTrafficGraceMs;
   }
-
-  if (!Number.isFinite(lastTrafficAtMs) || lastTrafficAtMs > nowMs) {
-    return false;
-  }
-
-  const safeIdleAnchorMs = Math.max(lastTrafficAtMs, duplicateObservedAtMs);
-  return nowMs - safeIdleAnchorMs >= postTrafficIdleMs;
+  return false;
 }
 
 export function isParentProcessAlive(
@@ -266,10 +258,7 @@ export function autoStartStdioMcpServer(
         return;
       }
 
-      const reason = lastTrafficAtMs === null
-        ? 'superseded_duplicate_before_traffic'
-        : 'superseded_duplicate_idle';
-      void shutdown(reason);
+      void shutdown('superseded_duplicate_before_traffic');
     }, DUPLICATE_SIBLING_WATCHDOG_INTERVAL_MS)
     : null;
   duplicateSiblingWatchdog?.unref();

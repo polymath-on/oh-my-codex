@@ -6,6 +6,7 @@ import {
   type OmxQuestionClientOptions,
   type OmxQuestionSuccessPayload,
 } from './client.js';
+import type { TerminalLifecycleOutcome } from '../runtime/terminal-lifecycle.js';
 import type { QuestionInput } from './types.js';
 
 const DEEP_INTERVIEW_STATE_FILE = 'deep-interview-state.json';
@@ -14,6 +15,7 @@ export interface DeepInterviewQuestionEnforcementState {
   obligation_id: string;
   source: 'omx-question';
   status: 'pending' | 'satisfied' | 'cleared';
+  lifecycle_outcome: 'askuserQuestion';
   requested_at: string;
   question_id?: string;
   satisfied_at?: string;
@@ -23,6 +25,7 @@ export interface DeepInterviewQuestionEnforcementState {
 
 interface DeepInterviewStateRecord {
   updated_at?: string;
+  lifecycle_outcome?: TerminalLifecycleOutcome;
   question_enforcement?: DeepInterviewQuestionEnforcementState;
   [key: string]: unknown;
 }
@@ -64,6 +67,7 @@ export function createDeepInterviewQuestionObligation(
     obligation_id: buildObligationId(now),
     source: 'omx-question',
     status: 'pending',
+    lifecycle_outcome: 'askuserQuestion',
     requested_at: now.toISOString(),
   };
 }
@@ -120,10 +124,26 @@ export async function updateDeepInterviewQuestionEnforcement(
   const nextState: DeepInterviewStateRecord = {
     ...state,
     updated_at: new Date().toISOString(),
-    ...(nextEnforcement ? { question_enforcement: nextEnforcement } : {}),
+    ...(nextEnforcement
+      ? {
+          question_enforcement: nextEnforcement,
+          ...(nextEnforcement.status === 'pending'
+            ? {
+                lifecycle_outcome: 'askuserQuestion',
+                run_outcome: 'blocked_on_user',
+                active: false,
+                completed_at: safeString(state.completed_at) || new Date().toISOString(),
+              }
+            : {}),
+        }
+      : {}),
   };
   if (!nextEnforcement) {
     delete nextState.question_enforcement;
+  }
+  if (nextEnforcement?.status !== 'pending') {
+    delete nextState.lifecycle_outcome;
+    delete nextState.run_outcome;
   }
 
   await writeDeepInterviewState(cwd, nextState, sessionId);

@@ -197,6 +197,29 @@ describe('state operations directory initialization', () => {
     }
   });
 
+  it('lists active modes from the explicit session scope without leaking a sibling Ralph session', async () => {
+    const wd = await mkdtemp(join(tmpdir(), 'omx-state-ops-foreign-ralph-scope-'));
+    try {
+      const currentSessionDir = join(wd, '.omx', 'state', 'sessions', 'sess-current');
+      const foreignSessionDir = join(wd, '.omx', 'state', 'sessions', 'sess-foreign');
+      await mkdir(currentSessionDir, { recursive: true });
+      await mkdir(foreignSessionDir, { recursive: true });
+      await writeFile(
+        join(foreignSessionDir, 'ralph-state.json'),
+        JSON.stringify({ active: true, current_phase: 'executing' }, null, 2),
+      );
+
+      const response = await executeStateOperation('state_list_active', {
+        workingDirectory: wd,
+        session_id: 'sess-current',
+      });
+
+      assert.deepEqual(response.payload, { active_modes: [] });
+    } finally {
+      await rm(wd, { recursive: true, force: true });
+    }
+  });
+
   it('creates session-scoped state directory when session_id is provided', async () => {
     const wd = await mkdtemp(join(tmpdir(), 'omx-state-ops-session-'));
     try {

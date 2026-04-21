@@ -4,6 +4,27 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-04-21
+
+Patch release focused on hardening the new interactive orchestration surfaces shipped in `0.14.0`: question-pane reliability across tmux environments, deep-interview Stop enforcement and reused-session bridging, setup/update refresh resilience, lifecycle contract deduplication, and code-review / lightweight fallback guidance polish.
+
+### Added
+- **Deep-interview bridge guidance for reused sessions** — prompt-side context now includes a concrete current-session CLI bridge command when bare `omx question` is unavailable.
+- **Detached question renderer liveness coverage** — regression tests now assert that detached tmux question sessions survive launch and fail closed when they disappear immediately.
+
+### Changed
+- **Code-review workflow guidance is stronger** — the shipped code-review skill now requires a more comprehensive, dual-perspective review posture.
+- **Lightweight native fallback lanes are leaner** — `omx explore` / `omx sparkshell` fallback guidance stays on mini/spark lanes without polluting the general role roster.
+- **Lifecycle normalization now delegates to the shared contract** — terminal lifecycle compatibility helpers reuse the centralized run-outcome contract instead of carrying a divergent copy.
+
+### Fixed
+- **Pending deep-interview questions now keep Stop blocked even after the mode marks itself inactive**.
+- **Question panes stay alive under non-POSIX tmux shells and fail closed when panes/sessions disappear during launch**.
+- **Accepted setup refreshes no longer destroy managed `AGENTS.md`, and postinstall/setup refresh stays rooted to npm's install prefix**.
+- **Explicit `omx update` now reruns setup refresh when the installed code is current but the setup stamp is stale, and update-check state write failures no longer block explicit updates**.
+- **Stale Ralph / skill-active / ultrawork Stop state no longer leaks across sessions or floods Stop handling**.
+- **Release metadata drift** — Node/Cargo metadata, lockfiles, changelog, release body, release notes, and release-readiness collateral are aligned to `0.14.1`.
+
 ## [0.14.0] - 2026-04-19
 
 Minor release centered on interactive orchestration changes: the new `omx question` blocking-question entrypoint, deep-interview and autoresearch flow tightening, advisory triage routing, explicit runtime run outcomes, specialist-routing cleanup, and release-proof hardening for the shipped package.

@@ -50,7 +50,7 @@ import {
 } from "../mcp/state-paths.js";
 import { SKILL_ACTIVE_STATE_MODE, syncCanonicalSkillStateForMode } from "../state/skill-active.js";
 import { isTrackedWorkflowMode } from "../state/workflow-transition.js";
-import { maybeCheckAndPromptUpdate } from "./update.js";
+import { maybeCheckAndPromptUpdate, runImmediateUpdate } from "./update.js";
 import { maybePromptGithubStar } from "./star-prompt.js";
 import {
   generateOverlay,
@@ -137,13 +137,14 @@ function resolveDistScript(pkgRoot: string, scriptName: string): string {
   return join(pkgRoot, "dist", "scripts", scriptName);
 }
 
-const HELP = `
+export const HELP = `
 oh-my-codex (omx) - Multi-agent orchestration for Codex CLI
 
 Usage:
   omx           Launch Codex CLI (HUD auto-attaches only when already inside tmux)
   omx exec      Run codex exec non-interactively with OMX AGENTS/overlay injection
   omx setup     Install skills, prompts, MCP servers, and scope-specific AGENTS.md
+  omx update    Check npm now, update the global install immediately, then refresh setup
   omx uninstall Remove OMX configuration and clean up installed artifacts
   omx doctor    Check installation health
   omx cleanup   Kill orphaned OMX MCP server processes and remove stale OMX /tmp directories
@@ -259,6 +260,7 @@ type CliCommand =
   | "launch"
   | "exec"
   | "setup"
+  | "update"
   | "agents"
   | "agents-init"
   | "deepinit"
@@ -644,6 +646,7 @@ export async function main(args: string[]): Promise<void> {
     "launch",
     "exec",
     "setup",
+    "update",
     "agents",
     "agents-init",
     "deepinit",
@@ -700,6 +703,9 @@ export async function main(args: string[]): Promise<void> {
           verbose: options.verbose,
           scope: resolveSetupScopeArg(args.slice(1)),
         });
+        break;
+      case "update":
+        await runImmediateUpdate(process.cwd());
         break;
       case "agents":
         await agentsCommand(args.slice(1));

@@ -154,6 +154,96 @@ Round {n} | Target: {weakest_dimension} | Ambiguity: {score}%
 {question}
 ```
 
+`omx question` payload guidance for interview rounds:
+- Use canonical `type` values instead of authoring raw `multi_select` flags by hand. `type: "single-answerable"` is the default for one-path decisions; `type: "multi-answerable"` is the canonical shape for bounded multi-select rounds. The runtime will keep `multi_select` aligned with `type`.
+- Use `single-answerable` when exactly one answer should drive the next branch, the options are mutually exclusive, or selecting more than one answer would blur the decision boundary. Typical cases: handoff lane selection, choosing the primary failure mode, or confirming which of several competing interpretations is correct.
+- Use `multi-answerable` when multiple options may all be true at once and you need to capture a bounded set of coexisting constraints, non-goals, risks, or acceptance checks in one round. Typical cases: selecting all out-of-scope items, all success metrics that must hold, or all deployment constraints that apply together.
+- If one selected option would immediately require a follow-up question to disambiguate the others, prefer a `single-answerable` round now and ask the follow-up next. Do not hide a branching interview tree inside one overloaded multi-select prompt.
+- Keep interview options bounded and concrete. If the valid answers are already known, set `allow_other: false`; only leave `allow_other: true` when the interview genuinely needs one user-supplied option that cannot be enumerated in advance.
+- Read answers structurally. For `single-answerable`, expect one decisive selection in `answer.value` plus `answer.selected_values`. For `multi-answerable`, treat `answer.selected_values` as the source of truth for all chosen constraints/non-goals and preserve the full set in the transcript/spec.
+
+Canonical bounded single-choice payload:
+
+```json
+{
+  "question": "Which execution lane should own this once the interview is complete?",
+  "type": "single-answerable",
+  "options": [
+    {
+      "label": "Plan first",
+      "value": "ralplan",
+      "description": "Need architecture and test-shape review before execution"
+    },
+    {
+      "label": "Execute directly",
+      "value": "autopilot",
+      "description": "Requirements are already explicit enough for planning plus execution"
+    },
+    {
+      "label": "Refine further",
+      "value": "refine",
+      "description": "Clarification is still needed before any handoff"
+    }
+  ],
+  "allow_other": false,
+  "other_label": "Other",
+  "source": "deep-interview"
+}
+```
+
+Canonical bounded multi-select payload:
+
+```json
+{
+  "question": "Which non-goals must stay out of scope for the first pass?",
+  "type": "multi-answerable",
+  "options": [
+    {
+      "label": "No UI redesign",
+      "value": "no-ui-redesign",
+      "description": "Keep layout and styling unchanged"
+    },
+    {
+      "label": "No new dependencies",
+      "value": "no-new-dependencies",
+      "description": "Work within the existing toolchain"
+    },
+    {
+      "label": "No API contract changes",
+      "value": "no-api-contract-changes",
+      "description": "Preserve external request and response shapes"
+    }
+  ],
+  "allow_other": false,
+  "other_label": "Other",
+  "source": "deep-interview"
+}
+```
+
+Canonical answer-shape reminders:
+
+```json
+{
+  "answer": {
+    "kind": "option",
+    "value": "ralplan",
+    "selected_labels": ["Plan first"],
+    "selected_values": ["ralplan"]
+  }
+}
+```
+
+```json
+{
+  "answer": {
+    "kind": "multi",
+    "value": ["no-new-dependencies", "no-api-contract-changes"],
+    "selected_labels": ["No new dependencies", "No API contract changes"],
+    "selected_values": ["no-new-dependencies", "no-api-contract-changes"]
+  }
+}
+```
+
 ### 2c) Score ambiguity
 Score each weighted dimension in `[0.0, 1.0]` with justification + gap.
 

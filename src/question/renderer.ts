@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { basename } from 'node:path';
-import { parsePaneIdFromTmuxOutput, shellEscapeSingle } from '../hud/tmux.js';
+import { parsePaneIdFromTmuxOutput } from '../hud/tmux.js';
+import { sleepSync } from '../utils/sleep.js';
 import { sanitizeReplyInput } from '../notifications/reply-listener.js';
 import { getCurrentTmuxPaneId } from '../notifications/tmux.js';
 import { resolveTmuxBinaryForPlatform } from '../utils/platform-command.js';
@@ -18,6 +19,12 @@ export interface LaunchQuestionRendererOptions {
 }
 
 export type ExecTmuxSync = (args: string[]) => string;
+export type SleepSync = (ms: number) => void;
+
+const QUESTION_TEXT_SETTLE_MS = 120;
+const QUESTION_SUBMIT_REPEAT_DELAY_MS = 100;
+const QUESTION_RENDERER_PANE_SETTLE_MS = 120;
+const QUESTION_RENDERER_SESSION_SETTLE_MS = 120;
 
 function safeString(value: unknown): string {
   return typeof value === 'string' ? value : '';
@@ -37,11 +44,29 @@ export function resolveQuestionRendererStrategy(
   return 'unsupported';
 }
 
-function buildQuestionUiCommand(recordPath: string, sessionId?: string): string {
-  const omxBin = resolveOmxCliEntryPath() || process.argv[1];
+function buildQuestionUiTmuxArgs(
+  recordPath: string,
+  options: {
+    cwd: string;
+    env?: NodeJS.ProcessEnv;
+    sessionId?: string;
+  },
+): string[] {
+  const omxBin = resolveOmxCliEntryPath({
+    argv1: process.argv[1],
+    cwd: options.cwd,
+    env: options.env,
+  }) || process.argv[1];
   if (!omxBin) throw new Error('Unable to resolve OMX CLI entry path for question UI launch.');
-  const sessionPrefix = sessionId ? `OMX_SESSION_ID=${shellEscapeSingle(sessionId)} ` : '';
-  return `${sessionPrefix}${shellEscapeSingle(process.execPath)} ${shellEscapeSingle(omxBin)} question --ui --state-path ${shellEscapeSingle(recordPath)}`;
+  return [
+    ...(options.sessionId ? ['-e', `OMX_SESSION_ID=${options.sessionId}`] : []),
+    process.execPath,
+    omxBin,
+    'question',
+    '--ui',
+    '--state-path',
+    recordPath,
+  ];
 }
 
 function defaultExecTmux(args: string[]): string {
@@ -60,6 +85,39 @@ function resolveReturnTarget(env: NodeJS.ProcessEnv = process.env): string | und
   return isPaneId(detectedPane) ? detectedPane : undefined;
 }
 
+function isLaunchedQuestionPaneAlive(
+  paneId: string,
+  execTmux: ExecTmuxSync,
+): boolean {
+  if (!isPaneId(paneId)) return false;
+  try {
+    const status = execTmux(['list-panes', '-t', paneId, '-F', '#{pane_dead}\t#{pane_id}']);
+    return status
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .some((line) => {
+        const [paneDead = '', resolvedPaneId = ''] = line.split('\t');
+        return resolvedPaneId === paneId && paneDead !== '1';
+      });
+  } catch {
+    return false;
+  }
+}
+
+function isLaunchedQuestionSessionAlive(
+  sessionName: string,
+  execTmux: ExecTmuxSync,
+): boolean {
+  if (!safeString(sessionName).trim()) return false;
+  try {
+    execTmux(['has-session', '-t', sessionName]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function formatQuestionAnswerForInjection(answer: QuestionAnswer): string {
   const prefix = '[omx question answered]';
   if (answer.kind === 'other') {
@@ -76,15 +134,19 @@ export function injectQuestionAnswerToPane(
   paneId: string,
   answer: QuestionAnswer,
   execTmux: ExecTmuxSync = defaultExecTmux,
+  sleepImpl: SleepSync = sleepSync,
 ): boolean {
   if (!isPaneId(paneId)) return false;
   const text = formatQuestionAnswerForInjection(answer);
   if (!text) return false;
 
   execTmux(['send-keys', '-t', paneId, '-l', '--', text]);
-  execTmux(['send-keys', '-t', paneId, 'Enter']);
-  execTmux(['send-keys', '-t', paneId, 'Enter']);
-  execTmux(['send-keys', '-t', paneId, 'Enter']);
+  // Match the repo-standard Codex raw-mode submit sequence: let literal text
+  // settle, then send isolated C-m submits rather than Enter key names.
+  sleepImpl(QUESTION_TEXT_SETTLE_MS);
+  execTmux(['send-keys', '-t', paneId, 'C-m']);
+  sleepImpl(QUESTION_SUBMIT_REPEAT_DELAY_MS);
+  execTmux(['send-keys', '-t', paneId, 'C-m']);
   return true;
 }
 
@@ -93,12 +155,18 @@ export function launchQuestionRenderer(
   deps: {
     strategy?: QuestionRendererStrategy;
     execTmux?: ExecTmuxSync;
+    sleepSync?: SleepSync;
   } = {},
 ): QuestionRendererState {
   const strategy = deps.strategy ?? resolveQuestionRendererStrategy(options.env ?? process.env);
   const execTmux = deps.execTmux ?? defaultExecTmux;
+  const sleepImpl = deps.sleepSync ?? sleepSync;
   const launchedAt = options.nowIso ?? new Date().toISOString();
-  const command = buildQuestionUiCommand(options.recordPath, options.sessionId);
+  const commandArgs = buildQuestionUiTmuxArgs(options.recordPath, {
+    cwd: options.cwd,
+    env: options.env,
+    sessionId: options.sessionId,
+  });
 
   if (strategy === 'inside-tmux') {
     const rawPane = execTmux([
@@ -111,10 +179,14 @@ export function launchQuestionRenderer(
       '#{pane_id}',
       '-c',
       options.cwd,
-      command,
+      ...commandArgs,
     ]);
     const paneId = parsePaneIdFromTmuxOutput(rawPane);
     if (!paneId) throw new Error('Failed to create tmux split pane for omx question UI.');
+    sleepImpl(QUESTION_RENDERER_PANE_SETTLE_MS);
+    if (!isLaunchedQuestionPaneAlive(paneId, execTmux)) {
+      throw new Error(`Question UI pane ${paneId} disappeared immediately after launch.`);
+    }
     const returnTarget = resolveReturnTarget(options.env ?? process.env);
     return {
       renderer: 'tmux-pane',
@@ -137,11 +209,16 @@ export function launchQuestionRenderer(
       sessionName,
       '-c',
       options.cwd,
-      command,
+      ...commandArgs,
     ]).trim();
+    const target = output || sessionName;
+    sleepImpl(QUESTION_RENDERER_SESSION_SETTLE_MS);
+    if (!isLaunchedQuestionSessionAlive(target, execTmux)) {
+      throw new Error(`Question UI session ${target} disappeared immediately after launch.`);
+    }
     return {
       renderer: 'tmux-session',
-      target: output || sessionName,
+      target,
       launched_at: launchedAt,
     };
   }

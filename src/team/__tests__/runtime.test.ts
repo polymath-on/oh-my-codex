@@ -694,6 +694,9 @@ describe('runtime', () => {
     const prevLaunchMode = process.env.OMX_TEAM_WORKER_LAUNCH_MODE;
     const prevWorkerCli = process.env.OMX_TEAM_WORKER_CLI;
     const prevSkipReadyWait = process.env.OMX_TEAM_SKIP_READY_WAIT;
+    const prevStartupEvidenceTimeout = process.env.OMX_TEAM_STARTUP_EVIDENCE_TIMEOUT_MS;
+    const prevStartupDispatchRetries = process.env.OMX_TEAM_STARTUP_DISPATCH_RETRIES;
+    const prevStartupDispatchRetryDelay = process.env.OMX_TEAM_STARTUP_DISPATCH_RETRY_DELAY_MS;
     let receiptFailer: NodeJS.Timeout | null = null;
 
     try {
@@ -774,6 +777,9 @@ esac
           process.env.OMX_TEAM_WORKER_LAUNCH_MODE = 'interactive';
           process.env.OMX_TEAM_WORKER_CLI = 'codex';
           process.env.OMX_TEAM_SKIP_READY_WAIT = '1';
+          process.env.OMX_TEAM_STARTUP_EVIDENCE_TIMEOUT_MS = '500';
+          process.env.OMX_TEAM_STARTUP_DISPATCH_RETRIES = '1';
+          process.env.OMX_TEAM_STARTUP_DISPATCH_RETRY_DELAY_MS = '50';
 
           receiptFailer = setInterval(() => {
             void (async () => {
@@ -832,6 +838,21 @@ esac
       else delete process.env.OMX_TEAM_WORKER_CLI;
       if (typeof prevSkipReadyWait === 'string') process.env.OMX_TEAM_SKIP_READY_WAIT = prevSkipReadyWait;
       else delete process.env.OMX_TEAM_SKIP_READY_WAIT;
+      if (typeof prevStartupEvidenceTimeout === 'string') {
+        process.env.OMX_TEAM_STARTUP_EVIDENCE_TIMEOUT_MS = prevStartupEvidenceTimeout;
+      } else {
+        delete process.env.OMX_TEAM_STARTUP_EVIDENCE_TIMEOUT_MS;
+      }
+      if (typeof prevStartupDispatchRetries === 'string') {
+        process.env.OMX_TEAM_STARTUP_DISPATCH_RETRIES = prevStartupDispatchRetries;
+      } else {
+        delete process.env.OMX_TEAM_STARTUP_DISPATCH_RETRIES;
+      }
+      if (typeof prevStartupDispatchRetryDelay === 'string') {
+        process.env.OMX_TEAM_STARTUP_DISPATCH_RETRY_DELAY_MS = prevStartupDispatchRetryDelay;
+      } else {
+        delete process.env.OMX_TEAM_STARTUP_DISPATCH_RETRY_DELAY_MS;
+      }
       await rm(cwd, { recursive: true, force: true });
     }
   });
@@ -1335,6 +1356,9 @@ esac
     const previousWorkerCli = process.env.OMX_TEAM_WORKER_CLI;
     const previousSkipReadyWait = process.env.OMX_TEAM_SKIP_READY_WAIT;
     const previousStartupEvidenceTimeout = process.env.OMX_TEAM_STARTUP_EVIDENCE_TIMEOUT_MS;
+    const previousStartupDispatchRetries = process.env.OMX_TEAM_STARTUP_DISPATCH_RETRIES;
+    const previousStartupDispatchRetryDelay = process.env.OMX_TEAM_STARTUP_DISPATCH_RETRY_DELAY_MS;
+    let receiptFailer: NodeJS.Timeout | null = null;
     let runtime: TeamRuntime | null = null;
     const teamName = 'team-no-startup-evidence';
 
@@ -1421,6 +1445,25 @@ process.on('SIGTERM', () => process.exit(0));
           process.env.OMX_TEAM_WORKER_CLI = 'codex';
           process.env.OMX_TEAM_SKIP_READY_WAIT = '1';
           process.env.OMX_TEAM_STARTUP_EVIDENCE_TIMEOUT_MS = '500';
+          process.env.OMX_TEAM_STARTUP_DISPATCH_RETRIES = '1';
+          process.env.OMX_TEAM_STARTUP_DISPATCH_RETRY_DELAY_MS = '50';
+
+          receiptFailer = setInterval(() => {
+            void (async () => {
+              const requests = await listDispatchRequests(teamName, cwd, { kind: 'inbox' }).catch(() => []);
+              for (const request of requests) {
+                if (request.status !== 'pending') continue;
+                await transitionDispatchRequest(
+                  teamName,
+                  request.request_id,
+                  'pending',
+                  'failed',
+                  { last_reason: 'test_failed_receipt' },
+                  cwd,
+                ).catch(() => {});
+              }
+            })();
+          }, 20);
 
           runtime = await withoutTeamWorkerEnv(() =>
             startTeam(
@@ -1449,6 +1492,7 @@ process.on('SIGTERM', () => process.exit(0));
         },
       );
     } finally {
+      if (receiptFailer) clearInterval(receiptFailer);
       if (runtime) {
         await shutdownTeam(teamName, cwd, { force: true }).catch(() => {});
       }
@@ -1467,6 +1511,16 @@ process.on('SIGTERM', () => process.exit(0));
       } else {
         delete process.env.OMX_TEAM_STARTUP_EVIDENCE_TIMEOUT_MS;
       }
+      if (typeof previousStartupDispatchRetries === 'string') {
+        process.env.OMX_TEAM_STARTUP_DISPATCH_RETRIES = previousStartupDispatchRetries;
+      } else {
+        delete process.env.OMX_TEAM_STARTUP_DISPATCH_RETRIES;
+      }
+      if (typeof previousStartupDispatchRetryDelay === 'string') {
+        process.env.OMX_TEAM_STARTUP_DISPATCH_RETRY_DELAY_MS = previousStartupDispatchRetryDelay;
+      } else {
+        delete process.env.OMX_TEAM_STARTUP_DISPATCH_RETRY_DELAY_MS;
+      }
       await rm(cwd, { recursive: true, force: true });
     }
   });
@@ -1477,7 +1531,10 @@ process.on('SIGTERM', () => process.exit(0));
     const previousTmuxPane = process.env.TMUX_PANE;
     const previousLaunchMode = process.env.OMX_TEAM_WORKER_LAUNCH_MODE;
     const previousWorkerCli = process.env.OMX_TEAM_WORKER_CLI;
+    const previousReadyTimeout = process.env.OMX_TEAM_READY_TIMEOUT_MS;
     const previousStartupEvidenceTimeout = process.env.OMX_TEAM_STARTUP_EVIDENCE_TIMEOUT_MS;
+    const previousStartupDispatchRetries = process.env.OMX_TEAM_STARTUP_DISPATCH_RETRIES;
+    const previousStartupDispatchRetryDelay = process.env.OMX_TEAM_STARTUP_DISPATCH_RETRY_DELAY_MS;
 
     try {
       await withMockTmuxFixture(
@@ -1539,7 +1596,10 @@ esac
           process.env.TMUX_PANE = '%1';
           process.env.OMX_TEAM_WORKER_LAUNCH_MODE = 'interactive';
           process.env.OMX_TEAM_WORKER_CLI = 'codex';
+          process.env.OMX_TEAM_READY_TIMEOUT_MS = '5000';
           process.env.OMX_TEAM_STARTUP_EVIDENCE_TIMEOUT_MS = '500';
+          process.env.OMX_TEAM_STARTUP_DISPATCH_RETRIES = '1';
+          process.env.OMX_TEAM_STARTUP_DISPATCH_RETRY_DELAY_MS = '50';
 
           await assert.rejects(
             () => withoutTeamWorkerEnv(() =>
@@ -1564,10 +1624,25 @@ esac
       else delete process.env.OMX_TEAM_WORKER_LAUNCH_MODE;
       if (typeof previousWorkerCli === 'string') process.env.OMX_TEAM_WORKER_CLI = previousWorkerCli;
       else delete process.env.OMX_TEAM_WORKER_CLI;
+      if (typeof previousReadyTimeout === 'string') {
+        process.env.OMX_TEAM_READY_TIMEOUT_MS = previousReadyTimeout;
+      } else {
+        delete process.env.OMX_TEAM_READY_TIMEOUT_MS;
+      }
       if (typeof previousStartupEvidenceTimeout === 'string') {
         process.env.OMX_TEAM_STARTUP_EVIDENCE_TIMEOUT_MS = previousStartupEvidenceTimeout;
       } else {
         delete process.env.OMX_TEAM_STARTUP_EVIDENCE_TIMEOUT_MS;
+      }
+      if (typeof previousStartupDispatchRetries === 'string') {
+        process.env.OMX_TEAM_STARTUP_DISPATCH_RETRIES = previousStartupDispatchRetries;
+      } else {
+        delete process.env.OMX_TEAM_STARTUP_DISPATCH_RETRIES;
+      }
+      if (typeof previousStartupDispatchRetryDelay === 'string') {
+        process.env.OMX_TEAM_STARTUP_DISPATCH_RETRY_DELAY_MS = previousStartupDispatchRetryDelay;
+      } else {
+        delete process.env.OMX_TEAM_STARTUP_DISPATCH_RETRY_DELAY_MS;
       }
       await rm(cwd, { recursive: true, force: true });
     }
@@ -1581,6 +1656,9 @@ esac
     const previousWorkerCli = process.env.OMX_TEAM_WORKER_CLI;
     const previousSkipReadyWait = process.env.OMX_TEAM_SKIP_READY_WAIT;
     const previousStartupEvidenceTimeout = process.env.OMX_TEAM_STARTUP_EVIDENCE_TIMEOUT_MS;
+    const previousStartupDispatchRetries = process.env.OMX_TEAM_STARTUP_DISPATCH_RETRIES;
+    const previousStartupDispatchRetryDelay = process.env.OMX_TEAM_STARTUP_DISPATCH_RETRY_DELAY_MS;
+    let receiptFailer: NodeJS.Timeout | null = null;
 
     try {
       await withMockTmuxFixture(
@@ -1677,6 +1755,25 @@ process.on('SIGTERM', () => process.exit(0));
           process.env.OMX_TEAM_WORKER_CLI = 'codex';
           process.env.OMX_TEAM_SKIP_READY_WAIT = '1';
           process.env.OMX_TEAM_STARTUP_EVIDENCE_TIMEOUT_MS = '500';
+          process.env.OMX_TEAM_STARTUP_DISPATCH_RETRIES = '1';
+          process.env.OMX_TEAM_STARTUP_DISPATCH_RETRY_DELAY_MS = '50';
+
+          receiptFailer = setInterval(() => {
+            void (async () => {
+              const requests = await listDispatchRequests('team-materialize-before-evidence', cwd, { kind: 'inbox' }).catch(() => []);
+              for (const request of requests) {
+                if (request.status !== 'pending') continue;
+                await transitionDispatchRequest(
+                  'team-materialize-before-evidence',
+                  request.request_id,
+                  'pending',
+                  'failed',
+                  { last_reason: 'test_failed_receipt' },
+                  cwd,
+                ).catch(() => {});
+              }
+            })();
+          }, 20);
 
           const teamPromise = withoutTeamWorkerEnv(() =>
             startTeam(
@@ -1700,7 +1797,7 @@ process.on('SIGTERM', () => process.exit(0));
           const workerTwoInbox = join(cwd, '.omx', 'state', 'team', sanitizedTeamName, 'workers', 'worker-2', 'inbox.md');
 
           let materializedAllWorkers = false;
-          for (let attempt = 0; attempt < 450; attempt += 1) {
+          for (let attempt = 0; attempt < 200; attempt += 1) {
             if (
               existsSync(workerOneIdentity)
               && existsSync(workerTwoIdentity)
@@ -1709,7 +1806,7 @@ process.on('SIGTERM', () => process.exit(0));
               materializedAllWorkers = true;
               break;
             }
-            await new Promise((resolve) => setTimeout(resolve, 100));
+            await new Promise((resolve) => setTimeout(resolve, 25));
           }
 
           assert.equal(
@@ -1729,6 +1826,7 @@ process.on('SIGTERM', () => process.exit(0));
         },
       );
     } finally {
+      if (receiptFailer) clearInterval(receiptFailer);
       if (typeof previousTmux === 'string') process.env.TMUX = previousTmux;
       else delete process.env.TMUX;
       if (typeof previousTmuxPane === 'string') process.env.TMUX_PANE = previousTmuxPane;
@@ -1743,6 +1841,16 @@ process.on('SIGTERM', () => process.exit(0));
         process.env.OMX_TEAM_STARTUP_EVIDENCE_TIMEOUT_MS = previousStartupEvidenceTimeout;
       } else {
         delete process.env.OMX_TEAM_STARTUP_EVIDENCE_TIMEOUT_MS;
+      }
+      if (typeof previousStartupDispatchRetries === 'string') {
+        process.env.OMX_TEAM_STARTUP_DISPATCH_RETRIES = previousStartupDispatchRetries;
+      } else {
+        delete process.env.OMX_TEAM_STARTUP_DISPATCH_RETRIES;
+      }
+      if (typeof previousStartupDispatchRetryDelay === 'string') {
+        process.env.OMX_TEAM_STARTUP_DISPATCH_RETRY_DELAY_MS = previousStartupDispatchRetryDelay;
+      } else {
+        delete process.env.OMX_TEAM_STARTUP_DISPATCH_RETRY_DELAY_MS;
       }
       await rm(cwd, { recursive: true, force: true });
     }

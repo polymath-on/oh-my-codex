@@ -1,6 +1,6 @@
 {
   "name": "oh-my-codex",
-  "version": "0.14.0",
+  "version": "0.14.1",
   "description": "Multi-agent orchestration layer for OpenAI Codex CLI",
   "type": "module",
   "main": "dist/index.js",
@@ -17,6 +17,7 @@
     "dev": "tsc --watch",
     "lint": "biome lint src bin",
     "prepack": "npm run build && npm run clean:native-package-assets",
+    "postinstall": "node src/scripts/postinstall-bootstrap.js",
     "setup": "node dist/cli/omx.js setup",
     "doctor": "node dist/cli/omx.js doctor",
     "ask:claude": "./src/scripts/ask-claude.sh",

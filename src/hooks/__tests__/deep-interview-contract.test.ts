@@ -173,6 +173,73 @@ describe("deep-interview Ouroboros contract", () => {
 		);
 	});
 
+	it("teaches canonical single-choice vs multi-answerable omx question payloads", () => {
+		assert.match(
+			deepInterviewSkill,
+			/Use canonical `type` values instead of authoring raw `multi_select` flags by hand/i,
+		);
+		assert.match(deepInterviewSkill, /type: "single-answerable"/i);
+		assert.match(deepInterviewSkill, /type: "multi-answerable"/i);
+		assert.match(
+			deepInterviewSkill,
+			/Use `single-answerable` when exactly one answer should drive the next branch/i,
+		);
+		assert.match(
+			deepInterviewSkill,
+			/Use `multi-answerable` when multiple options may all be true at once/i,
+		);
+		assert.match(
+			deepInterviewSkill,
+			/If one selected option would immediately require a follow-up question to disambiguate the others, prefer a `single-answerable` round now/i,
+		);
+		assert.match(
+			deepInterviewSkill,
+			/Keep interview options bounded and concrete\./i,
+		);
+		assert.match(
+			deepInterviewSkill,
+			/Canonical bounded single-choice payload:/i,
+		);
+		assert.match(
+			deepInterviewSkill,
+			/Which execution lane should own this once the interview is complete\?/i,
+		);
+		assert.match(deepInterviewSkill, /"value": "ralplan"/i);
+		assert.match(deepInterviewSkill, /"value": "autopilot"/i);
+		assert.match(deepInterviewSkill, /"value": "refine"/i);
+		assert.match(
+			deepInterviewSkill,
+			/Canonical bounded multi-select payload:/i,
+		);
+		assert.match(
+			deepInterviewSkill,
+			/Which non-goals must stay out of scope for the first pass\?/i,
+		);
+		assert.match(deepInterviewSkill, /"value": "no-ui-redesign"/i);
+		assert.match(deepInterviewSkill, /"value": "no-new-dependencies"/i);
+		assert.match(deepInterviewSkill, /"value": "no-api-contract-changes"/i);
+	});
+
+	it("locks canonical omx question answer shapes for single and multi rounds", () => {
+		assert.match(deepInterviewSkill, /Canonical answer-shape reminders:/i);
+		assert.match(deepInterviewSkill, /"kind": "option"/i);
+		assert.match(deepInterviewSkill, /"value": "ralplan"/i);
+		assert.match(deepInterviewSkill, /"selected_values": \["ralplan"\]/i);
+		assert.match(deepInterviewSkill, /"kind": "multi"/i);
+		assert.match(
+			deepInterviewSkill,
+			/"value": \["no-new-dependencies", "no-api-contract-changes"\]/i,
+		);
+		assert.match(
+			deepInterviewSkill,
+			/"selected_values": \["no-new-dependencies", "no-api-contract-changes"\]/i,
+		);
+		assert.match(
+			deepInterviewSkill,
+			/For `multi-answerable`, treat `answer\.selected_values` as the source of truth/i,
+		);
+	});
+
 	it("preserves clarified intent and boundary constraints across execution handoff", () => {
 		assert.match(
 			deepInterviewSkill,

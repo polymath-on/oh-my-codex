@@ -10,6 +10,7 @@ import {
   stripOmxEnvSettings,
   stripOmxTopLevelKeys,
   stripOmxFeatureFlags,
+  stripOmxSeededBehavioralDefaults,
 } from "../config/generator.js";
 import {
   parseCodexHooksConfig,
@@ -144,6 +145,9 @@ async function cleanConfig(
 
   // Strip top-level keys
   config = stripOmxTopLevelKeys(config);
+
+  // Strip OMX-seeded behavioral defaults only when the seeded pair is unchanged.
+  config = stripOmxSeededBehavioralDefaults(config);
 
   // Strip feature flags
   config = stripOmxFeatureFlags(config);

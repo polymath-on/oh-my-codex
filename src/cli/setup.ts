@@ -8,11 +8,12 @@ import {
   copyFile,
   readdir,
   readFile,
+  rename,
   writeFile,
   stat,
   rm,
 } from "fs/promises";
-import { join, dirname, relative } from "path";
+import { join, dirname, relative, basename } from "path";
 import { existsSync } from "fs";
 import { spawnSync } from "child_process";
 import { createInterface } from "readline/promises";
@@ -234,6 +235,29 @@ async function ensureBackup(
     console.log(`  backup ${destinationPath} -> ${backupPath}`);
   }
   return true;
+}
+
+async function moveExistingAgentsToDeterministicBackup(
+  destinationPath: string,
+  options: Pick<SetupOptions, "dryRun" | "verbose">,
+): Promise<string | null> {
+  if (!existsSync(destinationPath)) return null;
+
+  const backupBaseName = `.${basename(destinationPath)}.bkup`;
+  let backupPath = join(dirname(destinationPath), backupBaseName);
+  let suffix = 1;
+
+  while (existsSync(backupPath)) {
+    backupPath = join(dirname(destinationPath), `${backupBaseName}${suffix}`);
+    suffix += 1;
+  }
+
+  if (!options.dryRun) {
+    await rename(destinationPath, backupPath);
+  }
+
+  console.log(`  Backed up existing AGENTS.md to ${backupPath}.`);
+  return backupPath;
 }
 
 async function filesDiffer(src: string, dst: string): Promise<boolean> {
@@ -1213,6 +1237,7 @@ async function syncManagedAgentsContent(
   const destinationExists = existsSync(dstPath);
   let existing = "";
   let changed = true;
+  let acceptedInteractiveOverwrite = false;
 
   if (destinationExists) {
     existing = await readFile(dstPath, "utf-8");
@@ -1247,9 +1272,18 @@ async function syncManagedAgentsContent(
       }
       return "skipped";
     }
+
+    acceptedInteractiveOverwrite = true;
   }
 
-  if (await ensureBackup(dstPath, destinationExists, backupContext, options)) {
+  if (
+    acceptedInteractiveOverwrite &&
+    (await moveExistingAgentsToDeterministicBackup(dstPath, options))
+  ) {
+    summary.backedUp += 1;
+  } else if (
+    await ensureBackup(dstPath, destinationExists, backupContext, options)
+  ) {
     summary.backedUp += 1;
   }
 

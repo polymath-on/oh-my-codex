@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { once } from "node:events";
 import {
+  HELP,
   normalizeCodexLaunchArgs,
   buildTmuxShellCommand,
   buildTmuxPaneCommand,
@@ -902,7 +903,7 @@ describe("commandOwnsLocalHelp", () => {
   });
 
   it("returns false for top-level help-only commands", () => {
-    for (const command of ["help", "launch", "version"]) {
+    for (const command of ["help", "launch", "version", "update"]) {
       assert.equal(
         commandOwnsLocalHelp(command),
         false,
@@ -981,6 +982,13 @@ describe("resolveCliInvocation", () => {
     );
   });
 
+  it("resolves update to update command", () => {
+    assert.deepEqual(resolveCliInvocation(["update"]), {
+      command: "update",
+      launchArgs: [],
+    });
+  });
+
   it("resolves hooks to hooks command", () => {
     assert.deepEqual(resolveCliInvocation(["hooks"]), {
       command: "hooks",
@@ -1028,6 +1036,10 @@ describe("resolveCliInvocation", () => {
       command: "launch",
       launchArgs: ["--model", "gpt-5"],
     });
+  });
+
+  it("advertises the explicit update command in top-level help", () => {
+    assert.match(HELP, /omx update\s+Check npm now, update the global install immediately, then refresh setup/);
   });
 });
 

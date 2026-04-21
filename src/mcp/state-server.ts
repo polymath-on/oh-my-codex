@@ -45,6 +45,7 @@ import {
 	validateAndNormalizeRalphState,
 } from "../ralph/contract.js";
 import { ensureCanonicalRalphArtifacts } from "../ralph/persistence.js";
+import { applyRunOutcomeContract } from "../runtime/run-outcome.js";
 import { autoStartStdioMcpServer } from "./bootstrap.js";
 import {
 	LEGACY_TEAM_MCP_TOOLS,
@@ -167,6 +168,15 @@ export function buildStateServerTools() {
 					run_outcome: {
 						type: "string",
 						enum: ["continue", "finish", "blocked_on_user", "failed", "cancelled"],
+					},
+					lifecycle_outcome: {
+						type: "string",
+						enum: ["finished", "blocked", "failed", "userinterlude", "askuserQuestion"],
+					},
+					terminal_outcome: {
+						type: "string",
+						enum: ["finished", "blocked", "failed", "userinterlude", "askuserQuestion"],
+						description: "Legacy alias for lifecycle_outcome; canonical writes should prefer lifecycle_outcome.",
 					},
 					error: { type: "string" },
 					state: { type: "object", description: "Additional custom fields" },
@@ -374,6 +384,30 @@ export async function handleStateToolCall(request: {
 							...fields,
 							...((customState as Record<string, unknown>) || {}),
 						} as Record<string, unknown>;
+						const explicitRunOutcome = Object.prototype.hasOwnProperty.call(fields, "run_outcome")
+							|| (
+								customState != null
+								&& Object.prototype.hasOwnProperty.call(customState as Record<string, unknown>, "run_outcome")
+							);
+						if (!explicitRunOutcome) {
+							delete mergedRaw.run_outcome;
+						}
+						const explicitLifecycleOutcome = Object.prototype.hasOwnProperty.call(fields, "lifecycle_outcome")
+							|| (
+								customState != null
+								&& Object.prototype.hasOwnProperty.call(customState as Record<string, unknown>, "lifecycle_outcome")
+							);
+						if (!explicitLifecycleOutcome) {
+							delete mergedRaw.lifecycle_outcome;
+						}
+						const explicitTerminalOutcome = Object.prototype.hasOwnProperty.call(fields, "terminal_outcome")
+							|| (
+								customState != null
+								&& Object.prototype.hasOwnProperty.call(customState as Record<string, unknown>, "terminal_outcome")
+							);
+						if (!explicitTerminalOutcome) {
+							delete mergedRaw.terminal_outcome;
+						}
 						if (
 							mode === "ralph" &&
 							effectiveSessionId &&
@@ -382,7 +416,7 @@ export async function handleStateToolCall(request: {
 						mergedRaw.owner_omx_session_id = effectiveSessionId;
 					}
 
-					if (mode === "ralph") {
+						if (mode === "ralph") {
 						const originalPhase = mergedRaw.current_phase;
 						const validation = validateAndNormalizeRalphState(mergedRaw);
 						if (!validation.ok || !validation.state) {
@@ -400,6 +434,15 @@ export async function handleStateToolCall(request: {
 							}
 							Object.assign(mergedRaw, validation.state);
 							ensureRalphArtifacts = true;
+						}
+						if (mode !== SKILL_ACTIVE_STATE_MODE) {
+							const runOutcomeValidation = applyRunOutcomeContract(mergedRaw);
+							if (!runOutcomeValidation.ok || !runOutcomeValidation.state) {
+								validationError =
+									runOutcomeValidation.error || "Invalid run outcome state";
+								return;
+							}
+							Object.assign(mergedRaw, runOutcomeValidation.state);
 						}
 						if (isTrackedWorkflowMode(mode) && mergedRaw.active === true) {
 							try {
