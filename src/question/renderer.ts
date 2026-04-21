@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { basename } from 'node:path';
-import { parsePaneIdFromTmuxOutput, shellEscapeSingle } from '../hud/tmux.js';
+import { parsePaneIdFromTmuxOutput } from '../hud/tmux.js';
 import { sleepSync } from '../utils/sleep.js';
 import { sanitizeReplyInput } from '../notifications/reply-listener.js';
 import { getCurrentTmuxPaneId } from '../notifications/tmux.js';
@@ -43,22 +43,29 @@ export function resolveQuestionRendererStrategy(
   return 'unsupported';
 }
 
-function buildQuestionUiCommand(
+function buildQuestionUiTmuxArgs(
   recordPath: string,
   options: {
     cwd: string;
     env?: NodeJS.ProcessEnv;
     sessionId?: string;
   },
-): string {
+): string[] {
   const omxBin = resolveOmxCliEntryPath({
     argv1: process.argv[1],
     cwd: options.cwd,
     env: options.env,
   }) || process.argv[1];
   if (!omxBin) throw new Error('Unable to resolve OMX CLI entry path for question UI launch.');
-  const sessionPrefix = options.sessionId ? `OMX_SESSION_ID=${shellEscapeSingle(options.sessionId)} ` : '';
-  return `${sessionPrefix}${shellEscapeSingle(process.execPath)} ${shellEscapeSingle(omxBin)} question --ui --state-path ${shellEscapeSingle(recordPath)}`;
+  return [
+    ...(options.sessionId ? ['-e', `OMX_SESSION_ID=${options.sessionId}`] : []),
+    process.execPath,
+    omxBin,
+    'question',
+    '--ui',
+    '--state-path',
+    recordPath,
+  ];
 }
 
 function defaultExecTmux(args: string[]): string {
@@ -84,9 +91,14 @@ function isLaunchedQuestionPaneAlive(
   if (!isPaneId(paneId)) return false;
   try {
     const status = execTmux(['list-panes', '-t', paneId, '-F', '#{pane_dead}\t#{pane_id}']);
-    const firstLine = status.split('\n')[0]?.trim() || '';
-    const [paneDead = '', resolvedPaneId = ''] = firstLine.split('\t');
-    return paneDead !== '1' && resolvedPaneId === paneId;
+    return status
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .some((line) => {
+        const [paneDead = '', resolvedPaneId = ''] = line.split('\t');
+        return resolvedPaneId === paneId && paneDead !== '1';
+      });
   } catch {
     return false;
   }
@@ -136,7 +148,7 @@ export function launchQuestionRenderer(
   const execTmux = deps.execTmux ?? defaultExecTmux;
   const sleepImpl = deps.sleepSync ?? sleepSync;
   const launchedAt = options.nowIso ?? new Date().toISOString();
-  const command = buildQuestionUiCommand(options.recordPath, {
+  const commandArgs = buildQuestionUiTmuxArgs(options.recordPath, {
     cwd: options.cwd,
     env: options.env,
     sessionId: options.sessionId,
@@ -153,7 +165,7 @@ export function launchQuestionRenderer(
       '#{pane_id}',
       '-c',
       options.cwd,
-      command,
+      ...commandArgs,
     ]);
     const paneId = parsePaneIdFromTmuxOutput(rawPane);
     if (!paneId) throw new Error('Failed to create tmux split pane for omx question UI.');
@@ -183,7 +195,7 @@ export function launchQuestionRenderer(
       sessionName,
       '-c',
       options.cwd,
-      command,
+      ...commandArgs,
     ]).trim();
     return {
       renderer: 'tmux-session',

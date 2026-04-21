@@ -60,6 +60,16 @@ describe('launchQuestionRenderer', () => {
     assert.equal(calls.length, 2);
     assert.equal(calls[0]?.[0], 'split-window');
     assert.ok(!calls[0]?.includes('-d'));
+    assert.equal(calls[0]?.[calls[0]!.length - 6], process.execPath);
+    assert.equal(calls[0]?.[calls[0]!.length - 5]?.endsWith('/dist/cli/omx.js'), true);
+    assert.deepEqual(calls[0]?.slice(-4), [
+      'question',
+      '--ui',
+      '--state-path',
+      '/repo/.omx/state/sessions/s1/questions/question-1.json',
+    ]);
+    assert.ok(calls[0]?.includes('-e'));
+    assert.ok(calls[0]?.includes('OMX_SESSION_ID=s1'));
     assert.deepEqual(calls[1], ['list-panes', '-t', '%42', '-F', '#{pane_dead}\t#{pane_id}']);
   });
 
@@ -89,7 +99,49 @@ describe('launchQuestionRenderer', () => {
 
     assert.equal(calls.length, 2);
     assert.equal(calls[0]?.[0], 'split-window');
+    assert.equal(calls[0]?.[calls[0]!.length - 6], process.execPath);
+    assert.equal(calls[0]?.[calls[0]!.length - 5]?.endsWith('/dist/cli/omx.js'), true);
+    assert.deepEqual(calls[0]?.slice(-4), [
+      'question',
+      '--ui',
+      '--state-path',
+      '/repo/.omx/state/sessions/s1/questions/question-1.json',
+    ]);
     assert.deepEqual(calls[1], ['list-panes', '-t', '%42', '-F', '#{pane_dead}\t#{pane_id}']);
+  });
+
+  it('passes direct tmux argv so non-POSIX default shells do not parse a shell string', () => {
+    const calls: string[][] = [];
+    launchQuestionRenderer(
+      {
+        cwd: '/repo',
+        recordPath: '/repo/question with spaces.json',
+        sessionId: 'sess-123',
+        env: { TMUX: '/tmp/tmux-demo' } as NodeJS.ProcessEnv,
+      },
+      {
+        strategy: 'inside-tmux',
+        execTmux: (args) => {
+          calls.push(args);
+          if (args[0] === 'split-window') return '%77\n';
+          if (args[0] === 'list-panes') return '0\t%77\n';
+          return '';
+        },
+        sleepSync: () => {},
+      },
+    );
+
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0]?.some((part) => /question --ui --state-path/.test(part)), false);
+    assert.equal(calls[0]?.some((part) => /^'.*'$/.test(part)), false);
+    assert.equal(calls[0]?.[calls[0]!.length - 6], process.execPath);
+    assert.equal(calls[0]?.[calls[0]!.length - 5]?.endsWith('/dist/cli/omx.js'), true);
+    assert.deepEqual(calls[0]?.slice(-4), [
+      'question',
+      '--ui',
+      '--state-path',
+      '/repo/question with spaces.json',
+    ]);
   });
 
   it('uses detached sessions outside tmux', () => {
@@ -99,6 +151,7 @@ describe('launchQuestionRenderer', () => {
         cwd: '/repo',
         recordPath: '/repo/.omx/state/sessions/s1/questions/question-2.json',
         nowIso: '2026-04-19T00:00:00.000Z',
+        env: {} as NodeJS.ProcessEnv,
       },
       {
         strategy: 'detached-tmux',
@@ -113,6 +166,14 @@ describe('launchQuestionRenderer', () => {
     assert.equal(calls.length, 1);
     assert.equal(calls[0]?.[0], 'new-session');
     assert.ok(calls[0]?.includes('-d'));
+    assert.equal(calls[0]?.[calls[0]!.length - 6], process.execPath);
+    assert.equal(calls[0]?.[calls[0]!.length - 5]?.endsWith('/dist/cli/omx.js'), true);
+    assert.deepEqual(calls[0]?.slice(-4), [
+      'question',
+      '--ui',
+      '--state-path',
+      '/repo/.omx/state/sessions/s1/questions/question-2.json',
+    ]);
   });
 
   it('prefers the current launcher path over a stale ambient OMX_ENTRY_PATH when spawning the UI', () => {
@@ -145,9 +206,8 @@ describe('launchQuestionRenderer', () => {
       );
 
       assert.equal(result.target, '%42');
-      const command = calls[0]?.[calls[0].length - 1] || '';
-      assert.match(command, /\/repo\/dist\/cli\/omx\.js/);
-      assert.doesNotMatch(command, /\/stale\/global\/dist\/cli\/omx\.js/);
+      assert.equal(calls[0]?.includes('/repo/dist/cli/omx.js'), true);
+      assert.equal(calls[0]?.includes('/stale/global/dist/cli/omx.js'), false);
     } finally {
       process.argv[1] = originalArgv1;
     }
