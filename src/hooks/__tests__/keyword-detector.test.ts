@@ -706,6 +706,48 @@ describe('keyword detector skill-active-state lifecycle', () => {
     }
   });
 
+  it('preserves an existing deep-interview tmux_pane_id when prompt-submit re-seeds state without TMUX_PANE', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'omx-keyword-state-deep-interview-preserve-pane-'));
+    const stateDir = join(cwd, '.omx', 'state');
+    const sessionId = 'sess-deep-interview-preserve-pane';
+    const previousPane = process.env.TMUX_PANE;
+    try {
+      await mkdir(join(stateDir, 'sessions', sessionId), { recursive: true });
+      delete process.env.TMUX_PANE;
+      await writeFile(
+        join(stateDir, 'sessions', sessionId, 'deep-interview-state.json'),
+        JSON.stringify({
+          active: true,
+          mode: 'deep-interview',
+          current_phase: 'intent-first',
+          started_at: '2026-02-25T00:00:00.000Z',
+          updated_at: '2026-02-25T00:00:00.000Z',
+          session_id: sessionId,
+          tmux_pane_id: '%89',
+          tmux_pane_set_at: '2026-02-25T00:00:00.000Z',
+        }, null, 2),
+      );
+
+      const result = await recordSkillActivation({
+        stateDir,
+        text: '$deep-interview tighten the requirements',
+        sessionId,
+        nowIso: '2026-02-25T00:05:00.000Z',
+      });
+
+      assert.ok(result);
+      const modeState = JSON.parse(
+        await readFile(join(stateDir, 'sessions', sessionId, 'deep-interview-state.json'), 'utf-8'),
+      ) as { tmux_pane_id?: string; tmux_pane_set_at?: string };
+      assert.equal(modeState.tmux_pane_id, '%89');
+      assert.equal(modeState.tmux_pane_set_at, '2026-02-25T00:00:00.000Z');
+    } finally {
+      if (typeof previousPane === 'string') process.env.TMUX_PANE = previousPane;
+      else delete process.env.TMUX_PANE;
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
   it('seeds first-class state for ralplan prompt-submit activation', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'omx-keyword-state-ralplan-'));
     const stateDir = join(cwd, '.omx', 'state');

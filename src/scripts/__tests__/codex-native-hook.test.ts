@@ -101,6 +101,7 @@ const TEAM_ENV_KEYS = [
   "OMX_TEAM_STATE_ROOT",
   "OMX_TEAM_LEADER_CWD",
   "OMX_SESSION_ID",
+  "TMUX_PANE",
 ] as const;
 
 const priorTeamEnv = new Map<(typeof TEAM_ENV_KEYS)[number], string | undefined>();
@@ -840,10 +841,51 @@ describe("codex native hook dispatch", () => {
       assert.match(message, /do not fall back to `request_user_input` or plain-text questioning/i);
       assert.match(message, /After starting `omx question` in a background terminal, wait for that terminal to finish and read the JSON answer before continuing the interview\./);
       assert.match(message, /If bare `omx question` is unavailable in this reused session, use the current-session CLI bridge command:/);
-      assert.match(message, /OMX_QUESTION_RETURN_PANE=/);
-      assert.match(message, /preserve the leader pane/i);
-      assert.match(message, /`OMX_QUESTION_RETURN_PANE='?%\d+'? '.+' '.+dist\/cli\/omx\.js' question`/);
+      assert.match(message, /'.+' '.+dist\/cli\/omx\.js' question/);
+      assert.doesNotMatch(message, /OMX_QUESTION_RETURN_PANE=/);
+      assert.doesNotMatch(message, /preserve the leader pane/i);
       assert.match(message, /Stop remains blocked while a deep-interview question obligation is pending\./);
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+
+  it("includes leader-pane preservation guidance when a pane hint is available", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "omx-native-hook-deep-interview-pane-hint-"));
+    try {
+      const sessionId = "sess-deep-interview-pane-hint";
+      const sessionDir = join(cwd, ".omx", "state", "sessions", sessionId);
+      await mkdir(sessionDir, { recursive: true });
+      await writeJson(join(sessionDir, "deep-interview-state.json"), {
+        active: true,
+        mode: "deep-interview",
+        current_phase: "intent-first",
+        started_at: "2026-04-21T10:00:00.000Z",
+        updated_at: "2026-04-21T10:00:00.000Z",
+        tmux_pane_id: "%77",
+      });
+
+      const result = await dispatchCodexNativeHook(
+        {
+          hook_event_name: "UserPromptSubmit",
+          cwd,
+          session_id: sessionId,
+          thread_id: "thread-deep-interview-pane-hint",
+          turn_id: "turn-deep-interview-pane-hint",
+          prompt: "$deep-interview gather requirements",
+        },
+        { cwd },
+      );
+
+      assert.equal(result.omxEventName, "keyword-detector");
+      assert.equal(result.skillState?.skill, "deep-interview");
+      const message = String(
+        (result.outputJson as { hookSpecificOutput?: { additionalContext?: string } })?.hookSpecificOutput?.additionalContext || "",
+      );
+      assert.match(message, /OMX_QUESTION_RETURN_PANE='%77'/);
+      assert.match(message, /preserve the leader pane/i);
+      assert.match(message, /OMX_QUESTION_RETURN_PANE=%77/);
     } finally {
       await rm(cwd, { recursive: true, force: true });
     }

@@ -254,6 +254,8 @@ export async function persistDeepInterviewModeState(
     const nextState = withModeRuntimeContext<DeepInterviewModeState>(
       previousModeState ?? {},
       {
+        ...(previousModeState?.tmux_pane_id ? { tmux_pane_id: previousModeState.tmux_pane_id } : {}),
+        ...(previousModeState?.tmux_pane_set_at ? { tmux_pane_set_at: previousModeState.tmux_pane_set_at } : {}),
         active: true,
         mode: 'deep-interview',
         current_phase: previousModeState?.active ? previousModeState.current_phase || 'intent-first' : 'intent-first',
@@ -359,6 +361,8 @@ async function persistStatefulSkillSeedState(
     (preserveExistingModeState ? existingModeState : {}) ?? {},
     {
       ...(preserveExistingModeState ? existingModeState : {}),
+      ...(existingModeState?.tmux_pane_id ? { tmux_pane_id: existingModeState.tmux_pane_id } : {}),
+      ...(existingModeState?.tmux_pane_set_at ? { tmux_pane_set_at: existingModeState.tmux_pane_set_at } : {}),
       active: true,
       mode: config.mode,
       current_phase: preserveExistingModeState

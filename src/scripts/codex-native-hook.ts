@@ -566,8 +566,10 @@ async function buildSessionStartContext(
   return sections.length > 0 ? sections.join("\n\n") : null;
 }
 
-function resolveQuestionLeaderPaneHint(cwd: string): string {
-  const sessionId = safeString(process.env.OMX_SESSION_ID || process.env.CODEX_SESSION_ID || process.env.SESSION_ID).trim();
+function resolveQuestionLeaderPaneHint(cwd: string, payload?: CodexHookPayload): string {
+  const payloadSessionId = safeString(payload?.session_id).trim();
+  const envSessionId = safeString(process.env.OMX_SESSION_ID || process.env.CODEX_SESSION_ID || process.env.SESSION_ID).trim();
+  const sessionId = payloadSessionId || envSessionId;
   const candidatePaths = [
     ...(sessionId ? [getStatePath('deep-interview', cwd, sessionId), getStatePath('ralplan', cwd, sessionId), getStatePath('ralph', cwd, sessionId)] : []),
     getStatePath('deep-interview', cwd),
@@ -590,9 +592,9 @@ function resolveQuestionLeaderPaneHint(cwd: string): string {
   return /^%\d+$/.test(envPane) ? envPane : '';
 }
 
-function buildDeepInterviewQuestionBridgeInstruction(cwd: string): string {
+function buildDeepInterviewQuestionBridgeInstruction(cwd: string, payload?: CodexHookPayload): string {
   const omxBin = resolveOmxCliEntryPath({ cwd }) || process.argv[1] || "omx";
-  const leaderPaneHint = resolveQuestionLeaderPaneHint(cwd);
+  const leaderPaneHint = resolveQuestionLeaderPaneHint(cwd, payload);
   const bridgeCommand = leaderPaneHint
     ? `OMX_QUESTION_RETURN_PANE=${shellEscapeSingle(leaderPaneHint)} ${shellEscapeSingle(process.execPath)} ${shellEscapeSingle(omxBin)} question`
     : `${shellEscapeSingle(process.execPath)} ${shellEscapeSingle(omxBin)} question`;
@@ -606,6 +608,7 @@ function buildAdditionalContextMessage(
   prompt: string,
   skillState?: SkillActiveState | null,
   cwd: string = process.cwd(),
+  payload?: CodexHookPayload,
 ): string | null {
   if (!prompt) return null;
   const promptPriorityMessage = buildPromptPriorityMessage(prompt);
@@ -626,7 +629,7 @@ function buildAdditionalContextMessage(
     ? "Prompt-side `$ralph` activation seeds Ralph workflow state only; it does not invoke `omx ralph`. Use `omx ralph --prd ...` only when you explicitly want the PRD-gated CLI startup path."
     : null;
   const deepInterviewPromptActivationNote = skillState?.initialized_mode === "deep-interview"
-    ? buildDeepInterviewQuestionBridgeInstruction(cwd)
+    ? buildDeepInterviewQuestionBridgeInstruction(cwd, payload)
     : null;
   const combinedTransitionMessage = (() => {
     if (!skillState?.transition_message) return null;
@@ -1814,7 +1817,7 @@ export async function dispatchCodexNativeHook(
   if (hookEventName === "SessionStart" || hookEventName === "UserPromptSubmit") {
     const additionalContext = hookEventName === "SessionStart"
       ? await buildSessionStartContext(cwd, canonicalSessionId || nativeSessionId)
-      : (buildAdditionalContextMessage(readPromptText(payload), skillState, cwd) ?? triageAdditionalContext);
+      : (buildAdditionalContextMessage(readPromptText(payload), skillState, cwd, payload) ?? triageAdditionalContext);
     if (additionalContext) {
       outputJson = {
         hookSpecificOutput: {
