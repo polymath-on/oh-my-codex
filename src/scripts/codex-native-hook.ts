@@ -1720,7 +1720,17 @@ async function buildStopHookOutput(
     }
 
     const teamWorkerOutput = await buildTeamWorkerStopOutput(cwd);
-    if (hasTeamWorkerContext() && teamWorkerOutput) return teamWorkerOutput;
+    if (hasTeamWorkerContext() && teamWorkerOutput) {
+      return await returnPersistentStopBlock(
+        payload,
+        stateDir,
+        "team-worker-stop",
+        safeString(teamWorkerOutput.stopReason),
+        teamWorkerOutput,
+        canonicalSessionId,
+        { allowRepeatDuringStopHook: false },
+      );
+    }
 
     const autopilotOutput = await buildModeBasedStopOutput("autopilot", cwd, canonicalSessionId);
     if (autopilotOutput) {

@@ -3516,6 +3516,94 @@ esac
     }
   });
 
+  it("suppresses identical team worker Stop replays but re-blocks fresh turns and task state changes", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "omx-native-hook-stop-team-worker-repeat-"));
+    try {
+      await initTeamState(
+        "worker-repeat-team",
+        "worker stop repeat guard",
+        "executor",
+        1,
+        cwd,
+        undefined,
+        { ...process.env, OMX_SESSION_ID: "sess-stop-team-worker-repeat" },
+      );
+      const stateDir = join(cwd, ".omx", "state");
+      const workerDir = join(stateDir, "team", "worker-repeat-team", "workers", "worker-1");
+      const taskPath = join(stateDir, "team", "worker-repeat-team", "tasks", "task-1.json");
+      await writeJson(join(workerDir, "status.json"), {
+        state: "idle",
+        current_task_id: "1",
+        updated_at: new Date().toISOString(),
+      });
+      await writeJson(taskPath, {
+        id: "1",
+        subject: "hook task",
+        description: "finish hook task",
+        status: "in_progress",
+        owner: "worker-1",
+        created_at: new Date().toISOString(),
+      });
+
+      process.env.OMX_TEAM_WORKER = "worker-repeat-team/worker-1";
+      process.env.OMX_TEAM_STATE_ROOT = stateDir;
+      process.env.OMX_TEAM_LEADER_CWD = cwd;
+
+      const workerCwd = join(cwd, ".omx", "team", "worker-repeat-team", "worktrees", "worker-1");
+      const basePayload = {
+        hook_event_name: "Stop",
+        cwd: workerCwd,
+        session_id: "sess-stop-team-worker-repeat",
+        thread_id: "thread-stop-team-worker-repeat",
+        turn_id: "turn-stop-team-worker-repeat-1",
+        last_assistant_message: "I need to stop before this task is done.",
+      };
+      const expectedInProgress = {
+        decision: "block",
+        reason:
+          "OMX team worker worker-1 is still assigned non-terminal task 1 (in_progress); continue the current assigned task or report a concrete blocker before stopping.",
+        stopReason: "team_worker_worker-1_1_in_progress",
+        systemMessage: "OMX team worker worker-1 is still assigned task 1 (in_progress).",
+      };
+
+      const first = await dispatchCodexNativeHook(basePayload, { cwd: workerCwd });
+      const replay = await dispatchCodexNativeHook(
+        { ...basePayload, stop_hook_active: true },
+        { cwd: workerCwd },
+      );
+      const freshTurn = await dispatchCodexNativeHook(
+        { ...basePayload, turn_id: "turn-stop-team-worker-repeat-2", stop_hook_active: true },
+        { cwd: workerCwd },
+      );
+
+      await writeJson(taskPath, {
+        id: "1",
+        subject: "hook task",
+        description: "finish hook task",
+        status: "blocked",
+        owner: "worker-1",
+        created_at: new Date().toISOString(),
+      });
+      const stateChanged = await dispatchCodexNativeHook(
+        { ...basePayload, turn_id: "turn-stop-team-worker-repeat-2", stop_hook_active: true },
+        { cwd: workerCwd },
+      );
+
+      assert.deepEqual(first.outputJson, expectedInProgress);
+      assert.deepEqual(replay.outputJson, null);
+      assert.deepEqual(freshTurn.outputJson, expectedInProgress);
+      assert.deepEqual(stateChanged.outputJson, {
+        decision: "block",
+        reason:
+          "OMX team worker worker-1 is still assigned non-terminal task 1 (blocked); continue the current assigned task or report a concrete blocker before stopping.",
+        stopReason: "team_worker_worker-1_1_blocked",
+        systemMessage: "OMX team worker worker-1 is still assigned task 1 (blocked).",
+      });
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
   it("does not block Stop for a team worker when assigned task is terminal", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "omx-native-hook-stop-team-worker-terminal-"));
     const prevTeamWorker = process.env.OMX_TEAM_WORKER;
