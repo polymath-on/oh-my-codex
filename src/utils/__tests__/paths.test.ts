@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { join } from "path";
 import { homedir, tmpdir } from "os";
 import { existsSync } from "fs";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "fs/promises";
+import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from "fs/promises";
 import {
   codexHome,
   codexConfigPath,
@@ -409,8 +409,10 @@ describe("packageRoot", () => {
 });
 
 describe("OMX launcher path resolution", () => {
-  // Launcher paths are expected to use the canonical realpath contract so
-  // symlinked temp roots such as macOS /var -> /private/var compare stably.
+  // Existing launcher files are resolved through realpath before being stored or
+  // compared. These assertions intentionally use canonicalized expected paths
+  // so macOS /var -> /private/var temp roots and symlinked launch directories
+  // exercise the same canonical-realpath contract as production launch context.
   const originalEntryPath = process.env[OMX_ENTRY_PATH_ENV];
   const originalStartupCwd = process.env[OMX_STARTUP_CWD_ENV];
 
@@ -448,6 +450,41 @@ describe("OMX launcher path resolution", () => {
       assert.equal(resolved, canonicalizeComparablePath(launcherPath));
     } finally {
       await rm(startupCwd, { recursive: true, force: true });
+      await rm(laterCwd, { recursive: true, force: true });
+    }
+  });
+
+  it("canonicalizes symlinked startup cwd launcher paths to their real path", async () => {
+    const realRoot = await mkdtemp(join(tmpdir(), "omx-launcher-real-root-"));
+    const linkParent = await mkdtemp(join(tmpdir(), "omx-launcher-link-root-"));
+    const laterCwd = await mkdtemp(join(tmpdir(), "omx-launcher-symlink-later-"));
+    const realStartupCwd = join(realRoot, "project");
+    const linkedStartupCwd = join(linkParent, "project-link");
+    try {
+      const launcherDir = join(realStartupCwd, "dist", "cli");
+      const launcherPath = join(launcherDir, "omx.js");
+      await mkdir(launcherDir, { recursive: true });
+      await writeFile(launcherPath, "#!/usr/bin/env node\n", "utf-8");
+      await symlink(
+        realStartupCwd,
+        linkedStartupCwd,
+        process.platform === "win32" ? "junction" : "dir",
+      );
+
+      const resolved = resolveOmxEntryPath({
+        argv1: "dist/cli/omx.js",
+        cwd: laterCwd,
+        env: {
+          ...process.env,
+          [OMX_STARTUP_CWD_ENV]: linkedStartupCwd,
+        },
+      });
+
+      assert.equal(resolved, await realpath(launcherPath));
+      assert.notEqual(resolved, join(linkedStartupCwd, "dist", "cli", "omx.js"));
+    } finally {
+      await rm(realRoot, { recursive: true, force: true });
+      await rm(linkParent, { recursive: true, force: true });
       await rm(laterCwd, { recursive: true, force: true });
     }
   });
